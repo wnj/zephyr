@@ -70,4 +70,8 @@ config COUNTER_MCUX_RTC
 
 endif # COUNTER
 
+config UART_MCUX
+    default y
+    depends on SERIAL
+
 endif # SOC_MK66F18

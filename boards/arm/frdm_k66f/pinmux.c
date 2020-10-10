@@ -53,8 +53,11 @@ static int frdm_k66f_pinmux_init(const struct device *dev)
 	pinmux_pin_set(portc, 17, PORT_PCR_MUX(kPORT_MuxAlt3));
 #endif
 
+	/* SW2 */
+	pinmux_pin_set(portd,  11, PORT_PCR_MUX(kPORT_MuxAsGpio));
+
 	/* SW3 */
-//	pinmux_pin_set(porta,  4, PORT_PCR_MUX(kPORT_MuxAsGpio));
+	pinmux_pin_set(porta,  10, PORT_PCR_MUX(kPORT_MuxAsGpio));
 
 	/* Red, green, blue LEDs */
 	pinmux_pin_set(portc, 9, PORT_PCR_MUX(kPORT_MuxAsGpio));

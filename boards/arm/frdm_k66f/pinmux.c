@@ -64,6 +64,14 @@ static int frdm_k66f_pinmux_init(const struct device *dev)
 	pinmux_pin_set(porte, 6, PORT_PCR_MUX(kPORT_MuxAsGpio));
 	pinmux_pin_set(porta, 11, PORT_PCR_MUX(kPORT_MuxAsGpio));
 
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(spi1), okay) && CONFIG_SPI
+	/* SPI0 CS0, SCK, SOUT, SIN */
+	pinmux_pin_set(portd,  4, PORT_PCR_MUX(kPORT_MuxAlt7));
+	pinmux_pin_set(portd,  5, PORT_PCR_MUX(kPORT_MuxAlt7));
+	pinmux_pin_set(portd,  6, PORT_PCR_MUX(kPORT_MuxAlt7));
+	pinmux_pin_set(portd,  7, PORT_PCR_MUX(kPORT_MuxAlt7));
+#endif
+
 #if 0
 #ifdef CONFIG_MODEM_WNCM14A2A
 	/* WNC-M14A2A Modem POWER_ON */

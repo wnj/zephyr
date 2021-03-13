@@ -1,0 +1,18 @@
+#
+# Copyright (c) 2020, Bernhard Kraemer
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+config BOARD_TEENSY40
+	bool "PJRC TEENSY40"
+	depends on SOC_SERIES_IMX_RT
+	select SOC_PART_NUMBER_MIMXRT1062DVL6A
+
+config BOARD_TEENSY41
+	bool "PJRC TEENSY41"
+	depends on SOC_SERIES_IMX_RT
+	# correct part no would be MIMXRT1062DVJ6A for TEENSY41, but this type does
+	# not exist in zephyr´s SOC definition. MIMXRT1062DVL6A type is used instead
+	# as the only difference is package pitch.
+	select SOC_PART_NUMBER_MIMXRT1062DVL6A

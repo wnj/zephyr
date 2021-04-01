@@ -1,0 +1,14 @@
+# OKdo-E1 board
+
+# Copyright (c) 2019, NXP
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_OKDO_E1_CPU0
+	bool "OKdo-E1 [CPU0]"
+	depends on SOC_SERIES_LPC55XXX
+	select SOC_PART_NUMBER_LPC55S69JBD100
+
+config BOARD_OKDO_E1_CPU1
+	bool "OKdo-E1  [CPU1]"
+	depends on SOC_SERIES_LPC55XXX
+	select SOC_PART_NUMBER_LPC55S69JBD100

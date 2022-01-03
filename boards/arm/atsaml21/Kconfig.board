@@ -1,0 +1,8 @@
+# SAM L21 Board configuration
+
+# Copyright (c) 2018 Bryan O'Donoghue
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_ATSAML21
+	bool "SAM L21"
+	depends on SOC_PART_NUMBER_SAML21E18A

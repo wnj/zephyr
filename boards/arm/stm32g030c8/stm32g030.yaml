@@ -1,0 +1,14 @@
+identifier: stm32g030c8
+name: ST STM32G030C8
+type: mcu
+arch: arm
+toolchain:
+  - zephyr
+  - gnuarmemb
+  - xtools
+supported:
+  - gpio
+  - i2c
+  - spi
+ram: 8
+flash: 64

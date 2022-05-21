@@ -1,0 +1,8 @@
+# bare metal development board with STM32G030C8 MCU configuration
+
+# Copyright (c) 2022 wn.jacobs@gmail.com
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_STM32G030
+	bool "Bare metal STM32G030C8 Development Board"
+	depends on SOC_STM32G030XX

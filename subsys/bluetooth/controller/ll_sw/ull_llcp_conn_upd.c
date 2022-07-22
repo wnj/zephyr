@@ -27,7 +27,15 @@
 #include "lll/lll_df_types.h"
 #include "lll_conn.h"
 
+#include "lll_conn_iso.h"
+
 #include "ull_tx_queue.h"
+
+#include "isoal.h"
+#include "ull_iso_types.h"
+#include "ull_conn_iso_types.h"
+#include "ull_conn_iso_internal.h"
+
 #include "ull_conn_internal.h"
 #include "ull_conn_types.h"
 #include "ull_internal.h"
@@ -178,6 +186,16 @@ static bool cu_check_conn_parameters(struct ll_conn *conn, struct proc_ctx *ctx)
 	return !invalid;
 }
 #endif /* CONFIG_BT_CTLR_CONN_PARAM_REQ */
+
+static void cu_prepare_update_ind(struct ll_conn *conn, struct proc_ctx *ctx)
+{
+	ctx->data.cu.win_size = 1U;
+	ctx->data.cu.win_offset_us = 0U;
+
+
+	ctx->data.cu.instant = ull_conn_event_counter(conn) + conn->lll.latency +
+			       CONN_UPDATE_INSTANT_DELTA;
+}
 
 static bool cu_should_notify_host(struct proc_ctx *ctx)
 {
@@ -345,10 +363,7 @@ static void lp_cu_send_conn_update_ind(struct ll_conn *conn, struct proc_ctx *ct
 	if (llcp_lr_ispaused(conn) || !llcp_tx_alloc_peek(conn, ctx)) {
 		ctx->state = LP_CU_STATE_WAIT_TX_CONN_UPDATE_IND;
 	} else {
-		ctx->data.cu.win_size = 1U;
-		ctx->data.cu.win_offset_us = 0U;
-		ctx->data.cu.instant = ull_conn_event_counter(conn) + conn->lll.latency +
-				       CONN_UPDATE_INSTANT_DELTA;
+		cu_prepare_update_ind(conn, ctx);
 		lp_cu_tx(conn, ctx, PDU_DATA_LLCTRL_TYPE_CONN_UPDATE_IND);
 		ctx->rx_opcode = PDU_DATA_LLCTRL_TYPE_UNUSED;
 		ctx->state = LP_CU_STATE_WAIT_INSTANT;
@@ -484,6 +499,8 @@ static void lp_cu_st_wait_rx_conn_update_ind(struct ll_conn *conn, struct proc_c
 		ctx->state = LP_CU_STATE_WAIT_INSTANT;
 		break;
 	case LP_CU_EVT_UNKNOWN:
+		/* Unsupported in peer, so disable locally for this connection */
+		feature_unmask_features(conn, LL_FEAT_BIT_CONN_PARAM_REQ);
 		ctx->data.cu.error = BT_HCI_ERR_UNSUPP_REMOTE_FEATURE;
 		lp_cu_wait_complete(conn, ctx, evt, param);
 		break;
@@ -762,10 +779,7 @@ static void rp_cu_send_conn_update_ind(struct ll_conn *conn, struct proc_ctx *ct
 	if (llcp_rr_ispaused(conn) || !llcp_tx_alloc_peek(conn, ctx)) {
 		ctx->state = RP_CU_STATE_WAIT_TX_CONN_UPDATE_IND;
 	} else {
-		ctx->data.cu.win_size = 1U;
-		ctx->data.cu.win_offset_us = 0U;
-		ctx->data.cu.instant = ull_conn_event_counter(conn) + conn->lll.latency +
-				       CONN_UPDATE_INSTANT_DELTA;
+		cu_prepare_update_ind(conn, ctx);
 		rp_cu_tx(conn, ctx, PDU_DATA_LLCTRL_TYPE_CONN_UPDATE_IND);
 		ctx->rx_opcode = PDU_DATA_LLCTRL_TYPE_UNUSED;
 		ctx->state = RP_CU_STATE_WAIT_INSTANT;
@@ -874,7 +888,7 @@ static void rp_cu_st_wait_conn_param_req_available(struct ll_conn *conn, struct 
 			if (params_changed) {
 				rp_cu_send_conn_param_req_ntf(conn, ctx, evt, param);
 			} else {
-				ctx->state = RP_CU_STATE_WAIT_CONN_PARAM_REQ_REPLY;
+				ctx->state = RP_CU_STATE_WAIT_CONN_PARAM_REQ_REPLY_CONTINUE;
 			}
 		}
 	default:
@@ -1041,9 +1055,18 @@ static void rp_cu_st_wait_rx_conn_update_ind(struct ll_conn *conn, struct proc_c
 			break;
 		case BT_HCI_ROLE_PERIPHERAL:
 			llcp_pdu_decode_conn_update_ind(ctx, param);
-			ctx->state = RP_CU_STATE_WAIT_INSTANT;
-			/* In case we only just received it in time */
-			rp_cu_check_instant(conn, ctx, evt, param);
+
+			if (is_instant_not_passed(ctx->data.cu.instant,
+						  ull_conn_event_counter(conn))) {
+
+				ctx->state = RP_CU_STATE_WAIT_INSTANT;
+				/* In case we only just received it in time */
+				rp_cu_check_instant(conn, ctx, evt, param);
+			} else {
+				conn->llcp_terminate.reason_final = BT_HCI_ERR_INSTANT_PASSED;
+				llcp_rr_complete(conn);
+				ctx->state = RP_CU_STATE_IDLE;
+			}
 			break;
 		default:
 			/* Unknown role */

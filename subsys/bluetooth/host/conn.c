@@ -48,6 +48,23 @@ struct tx_meta {
 #define tx_data(buf) ((struct tx_meta *)net_buf_user_data(buf))
 K_FIFO_DEFINE(free_tx);
 
+static void tx_free(struct bt_conn_tx *tx);
+
+static void conn_tx_destroy(struct bt_conn *conn, struct bt_conn_tx *tx)
+{
+	__ASSERT_NO_MSG(tx);
+
+	bt_conn_tx_cb_t cb = tx->cb;
+	void *user_data = tx->user_data;
+
+	/* Free up TX metadata before calling callback in case the callback
+	 * tries to allocate metadata
+	 */
+	tx_free(tx);
+
+	cb(conn, user_data, -ESHUTDOWN);
+}
+
 #if defined(CONFIG_BT_CONN_TX)
 static void tx_complete_work(struct k_work *work);
 #endif /* CONFIG_BT_CONN_TX */
@@ -115,10 +132,15 @@ struct k_sem *bt_conn_get_pkts(struct bt_conn *conn)
 	}
 #endif /* CONFIG_BT_BREDR */
 #if defined(CONFIG_BT_ISO)
-	if (conn->type == BT_CONN_TYPE_ISO || bt_dev.le.iso_mtu) {
-		if (bt_dev.le.iso_pkts.limit) {
+	/* Use ISO pkts semaphore if LE Read Buffer Size command returned
+	 * dedicated ISO buffers.
+	 */
+	if (conn->type == BT_CONN_TYPE_ISO) {
+		if (bt_dev.le.iso_mtu && bt_dev.le.iso_pkts.limit) {
 			return &bt_dev.le.iso_pkts;
 		}
+
+		return NULL;
 	}
 #endif /* CONFIG_BT_ISO */
 #if defined(CONFIG_BT_CONN)
@@ -167,19 +189,21 @@ static void tx_notify(struct bt_conn *conn)
 	BT_DBG("conn %p", conn);
 
 	while (1) {
-		struct bt_conn_tx *tx;
+		struct bt_conn_tx *tx = NULL;
 		unsigned int key;
 		bt_conn_tx_cb_t cb;
 		void *user_data;
 
 		key = irq_lock();
-		if (sys_slist_is_empty(&conn->tx_complete)) {
-			irq_unlock(key);
-			break;
+		if (!sys_slist_is_empty(&conn->tx_complete)) {
+			tx = CONTAINER_OF(sys_slist_get_not_empty(&conn->tx_complete),
+					  struct bt_conn_tx, node);
 		}
-
-		tx = (void *)sys_slist_get_not_empty(&conn->tx_complete);
 		irq_unlock(key);
+
+		if (!tx) {
+			return;
+		}
 
 		BT_DBG("tx %p cb %p user_data %p", tx, tx->cb, tx->user_data);
 
@@ -194,7 +218,7 @@ static void tx_notify(struct bt_conn *conn)
 		 * allocate new buffers since the TX should have been
 		 * unblocked by tx_free.
 		 */
-		cb(conn, user_data);
+		cb(conn, user_data, 0);
 	}
 }
 
@@ -537,7 +561,7 @@ static bool send_frag(struct bt_conn *conn, struct net_buf *buf, uint8_t flags,
 fail:
 	k_sem_give(bt_conn_get_pkts(conn));
 	if (tx) {
-		tx_free(tx);
+		conn_tx_destroy(conn, tx);
 	}
 
 	if (always_consume) {
@@ -650,7 +674,7 @@ static void conn_cleanup(struct bt_conn *conn)
 	/* Give back any allocated buffers */
 	while ((buf = net_buf_get(&conn->tx_queue, K_NO_WAIT))) {
 		if (tx_data(buf)->tx) {
-			tx_free(tx_data(buf)->tx);
+			conn_tx_destroy(conn, tx_data(buf)->tx);
 		}
 
 		net_buf_unref(buf);
@@ -699,7 +723,8 @@ int bt_conn_prepare_events(struct k_poll_event events[])
 
 	BT_DBG("");
 
-	conn_change.signaled = 0U;
+	k_poll_signal_init(&conn_change);
+
 	k_poll_event_init(&events[ev_count++], K_POLL_TYPE_SIGNAL,
 			  K_POLL_MODE_NOTIFY_ONLY, &conn_change);
 
@@ -778,7 +803,7 @@ static void process_unack_tx(struct bt_conn *conn)
 		tx->pending_no_cb = 0U;
 		irq_unlock(key);
 
-		tx_free(tx);
+		conn_tx_destroy(conn, tx);
 
 		k_sem_give(bt_conn_get_pkts(conn));
 	}
@@ -1986,6 +2011,9 @@ void bt_conn_security_changed(struct bt_conn *conn, uint8_t hci_err,
 
 	reset_pairing(conn);
 	bt_l2cap_security_changed(conn, hci_err);
+	if (IS_ENABLED(CONFIG_BT_ISO_CENTRAL)) {
+		bt_iso_security_changed(conn, hci_err);
+	}
 
 	for (cb = callback_list; cb; cb = cb->_next) {
 		if (cb->security_changed) {
@@ -2465,7 +2493,7 @@ static bool create_param_validate(const struct bt_conn_le_create_param *param)
 {
 #if defined(CONFIG_BT_PRIVACY)
 	/* Initiation timeout cannot be greater than the RPA timeout */
-	const uint32_t timeout_max = (MSEC_PER_SEC / 10) * CONFIG_BT_RPA_TIMEOUT;
+	const uint32_t timeout_max = (MSEC_PER_SEC / 10) * bt_dev.rpa_timeout;
 
 	if (param->timeout > timeout_max) {
 		return false;
@@ -2646,7 +2674,8 @@ int bt_conn_le_create(const bt_addr_le_t *peer,
 	create_param_setup(create_param);
 
 #if defined(CONFIG_BT_SMP)
-	if (!bt_dev.le.rl_size || bt_dev.le.rl_entries > bt_dev.le.rl_size) {
+	if (IS_ENABLED(CONFIG_BT_PRIVACY) &&
+	    (!bt_dev.le.rl_size || bt_dev.le.rl_entries > bt_dev.le.rl_size)) {
 		bt_conn_set_state(conn, BT_CONN_CONNECTING_SCAN);
 
 		err = bt_le_scan_update(true);

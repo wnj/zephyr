@@ -354,8 +354,8 @@ static ALWAYS_INLINE struct k_thread *next_up(void)
 		end_thread(_current);
 	}
 
-	int queued = z_is_thread_queued(_current);
-	int active = !z_is_thread_prevented_from_running(_current);
+	bool queued = z_is_thread_queued(_current);
+	bool active = !z_is_thread_prevented_from_running(_current);
 
 	if (thread == NULL) {
 		thread = _current_cpu->idle_thread;
@@ -1711,6 +1711,13 @@ static void end_thread(struct k_thread *thread)
 void z_thread_abort(struct k_thread *thread)
 {
 	k_spinlock_key_t key = k_spin_lock(&sched_spinlock);
+
+	if ((thread->base.user_options & K_ESSENTIAL) != 0) {
+		k_spin_unlock(&sched_spinlock, key);
+		__ASSERT(false, "aborting essential thread %p", thread);
+		k_panic();
+		return;
+	}
 
 	if ((thread->base.thread_state & _THREAD_DEAD) != 0U) {
 		k_spin_unlock(&sched_spinlock, key);

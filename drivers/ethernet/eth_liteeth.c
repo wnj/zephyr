@@ -80,7 +80,7 @@ static int eth_initialize(const struct device *dev)
 
 static int eth_tx(const struct device *dev, struct net_pkt *pkt)
 {
-	int key;
+	unsigned int key;
 	uint16_t len;
 	struct eth_liteeth_dev_data *context = dev->data;
 
@@ -129,7 +129,7 @@ static void eth_rx(const struct device *port)
 	key = irq_lock();
 
 	/* get frame's length */
-	len = litex_read32(LITEETH_RX_LENGTH_ADDR);
+	len = litex_read16(LITEETH_RX_LENGTH_ADDR);
 
 	/* which slot is the frame in */
 	context->rxslot = litex_read8(LITEETH_RX_SLOT_ADDR);

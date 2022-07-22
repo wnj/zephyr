@@ -45,6 +45,9 @@
 		bootloader-led0 = &blue_led;
 		pwm-led0 = &pwm_led0;
 		sw0 = &button0;
+		mcuboot-button0 = &button0;
+		mcuboot-led0 = &blue_led;
+		watchdog0 = &wdt0;
 	};
 
 	/* Used for accessing other pins */

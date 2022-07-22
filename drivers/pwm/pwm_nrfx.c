@@ -11,9 +11,9 @@
 #include <hal/nrf_gpio.h>
 #include <stdbool.h>
 
-#define LOG_LEVEL CONFIG_PWM_LOG_LEVEL
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(pwm_nrfx);
+
+LOG_MODULE_REGISTER(pwm_nrfx, CONFIG_PWM_LOG_LEVEL);
 
 #define PWM_NRFX_CH_POLARITY_MASK          BIT(15)
 #define PWM_NRFX_CH_PULSE_CYCLES_MASK      BIT_MASK(15)
@@ -365,7 +365,7 @@ static int pwm_nrfx_pm_action(const struct device *dev,
 				(PWM_CH_INVERTED(idx, 3) ? BIT(3) : 0),))     \
 	};								      \
 	IF_ENABLED(CONFIG_PINCTRL, (PINCTRL_DT_DEFINE(PWM(idx))));	      \
-	static const struct pwm_nrfx_config pwm_nrfx_##idx##config = {	      \
+	static const struct pwm_nrfx_config pwm_nrfx_##idx##_config = {	      \
 		.pwm = NRFX_PWM_INSTANCE(idx),				      \
 		.initial_config = {					      \
 			COND_CODE_1(CONFIG_PINCTRL,			      \
@@ -394,7 +394,7 @@ static int pwm_nrfx_pm_action(const struct device *dev,
 	DEVICE_DT_DEFINE(PWM(idx),					      \
 			 pwm_nrfx_init, PM_DEVICE_DT_GET(PWM(idx)),	      \
 			 &pwm_nrfx_##idx##_data,			      \
-			 &pwm_nrfx_##idx##config,			      \
+			 &pwm_nrfx_##idx##_config,			      \
 			 POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,     \
 			 &pwm_nrfx_drv_api_funcs)
 

@@ -153,6 +153,10 @@ struct ll_conn {
 
 	struct node_rx_pdu *llcp_rx;
 
+#if defined(CONFIG_BT_CTLR_RX_ENQUEUE_HOLD)
+	struct node_rx_pdu *llcp_rx_hold;
+#endif /* CONFIG_BT_CTLR_RX_ENQUEUE_HOLD */
+
 	struct {
 		uint8_t  req;
 		uint8_t  ack;
@@ -458,14 +462,12 @@ struct llcp_struct {
 	} cte_rsp;
 #endif /* CONFIG_BT_CTLR_DF_CONN_CTE_RSP */
 
-#if (CONFIG_BT_CTLR_LLCP_PER_CONN_TX_CTRL_BUF_NUM > 0) &&\
-	(CONFIG_BT_CTLR_LLCP_PER_CONN_TX_CTRL_BUF_NUM <\
-	CONFIG_BT_CTLR_LLCP_TX_PER_CONN_TX_CTRL_BUF_NUM_MAX)
+	struct {
+		uint8_t terminate_ack;
+	} cis;
 
 	uint8_t tx_buffer_alloc;
-#endif /* (CONFIG_BT_CTLR_LLCP_PER_CONN_TX_CTRL_BUF_NUM > 0) */
 	uint8_t tx_q_pause_data_mask;
-
 }; /* struct llcp_struct */
 
 struct ll_conn {
@@ -539,7 +541,7 @@ struct ll_conn {
 	uint16_t connect_expire;
 	uint16_t supervision_reload;
 	uint16_t supervision_expire;
-
+	uint32_t connect_accept_to;
 
 #if defined(CONFIG_BT_CTLR_PHY)
 	uint8_t phy_pref_tx:3;

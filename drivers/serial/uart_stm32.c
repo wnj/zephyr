@@ -77,8 +77,6 @@ uint32_t lpuartdiv_calc(const uint64_t clock_rate, const uint32_t baud_rate)
 #endif /* USART_PRESC_PRESCALER */
 #endif /* HAS_LPUART_1 */
 
-#define TIMEOUT 1000
-
 #ifdef CONFIG_PM
 static void uart_stm32_pm_policy_state_lock_get(const struct device *dev)
 {
@@ -539,7 +537,7 @@ static void uart_stm32_poll_out(const struct device *dev,
 #ifdef CONFIG_PM
 	struct uart_stm32_data *data = dev->data;
 #endif
-	int key;
+	unsigned int key;
 
 	/* Wait for TXE flag to be raised
 	 * When TXE flag is raised, we lock interrupts to prevent interrupts (notably that of usart)
@@ -651,7 +649,7 @@ static int uart_stm32_fifo_fill(const struct device *dev,
 {
 	const struct uart_stm32_config *config = dev->config;
 	uint8_t num_tx = 0U;
-	int key;
+	unsigned int key;
 
 	if (!LL_USART_IsActiveFlag_TXE(config->usart)) {
 		return num_tx;
@@ -704,7 +702,7 @@ static void uart_stm32_irq_tx_enable(const struct device *dev)
 	const struct uart_stm32_config *config = dev->config;
 #ifdef CONFIG_PM
 	struct uart_stm32_data *data = dev->data;
-	int key;
+	unsigned int key;
 #endif
 
 #ifdef CONFIG_PM
@@ -725,7 +723,7 @@ static void uart_stm32_irq_tx_disable(const struct device *dev)
 	const struct uart_stm32_config *config = dev->config;
 #ifdef CONFIG_PM
 	struct uart_stm32_data *data = dev->data;
-	int key;
+	unsigned int key;
 
 	key = irq_lock();
 #endif

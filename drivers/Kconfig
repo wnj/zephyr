@@ -57,6 +57,8 @@ source "drivers/dac/Kconfig"
 
 source "drivers/watchdog/Kconfig"
 
+source "drivers/w1/Kconfig"
+
 source "drivers/clock_control/Kconfig"
 
 source "drivers/ptp_clock/Kconfig"
@@ -140,5 +142,9 @@ source "drivers/usbc/Kconfig"
 source "drivers/reset/Kconfig"
 
 source "drivers/mipi_dsi/Kconfig"
+
+source "drivers/coredump/Kconfig"
+
+source "drivers/xen/Kconfig"
 
 endmenu

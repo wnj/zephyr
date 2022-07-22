@@ -66,7 +66,7 @@ jobs:
 
       - name: use cache
         id: cache-ccache
-        uses: nashif/action-s3-cache@master
+        uses: zephyrproject-rtos/action-s3-cache@v1
         with:
           key: ${{ steps.ccache_cache_prop.outputs.repo }}-${{github.event_name}}-${{matrix.platform}}-codecov-ccache
           path: /github/home/.ccache
@@ -86,7 +86,7 @@ jobs:
           export ZEPHYR_BASE=${PWD}
           export ZEPHYR_TOOLCHAIN_VARIANT=zephyr
           mkdir -p coverage/reports
-          ./scripts/twister -N -v --filter runnable -p ${{ matrix.platform }} --coverage -T tests
+          ./scripts/twister --force-color -N -v --filter runnable -p ${{ matrix.platform }} --coverage -T tests
 
       - name: Generate Coverage Report
         run: |

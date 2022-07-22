@@ -111,42 +111,34 @@
 	/* PWM peripheral interfaces */
 	/omit-if-no-ref/ pwm0_gpc3: periph-pwm0 {
 		pinmux = <&alt4_pwm0_sl>;
-		drive-supported;
 	};
 
 	/omit-if-no-ref/ pwm1_gpc2: periph-pwm1 {
 		pinmux = <&alt4_pwm1_sl>;
-		drive-supported;
 	};
 
 	/omit-if-no-ref/ pwm2_gpc4: periph-pwm2 {
 		pinmux = <&alt4_pwm2_sl>;
-		drive-supported;
 	};
 
 	/omit-if-no-ref/ pwm3_gp80: periph-pwm3 {
 		pinmux = <&alt4_pwm3_sl>;
-		drive-supported;
 	};
 
 	/omit-if-no-ref/ pwm4_gpb6: periph-pwm4 {
 		pinmux = <&alt4_pwm4_sl>;
-		drive-supported;
 	};
 
 	/omit-if-no-ref/ pwm5_gpb7: periph-pwm5 {
 		pinmux = <&alt4_pwm5_sl>;
-		drive-supported;
 	};
 
 	/omit-if-no-ref/ pwm6_gpc0: periph-pwm6 {
 		pinmux = <&alt4_pwm6_sl>;
-		drive-supported;
 	};
 
 	/omit-if-no-ref/ pwm7_gp60: periph-pwm7 {
 		pinmux = <&alt4_pwm7_sl>;
-		drive-supported;
 	};
 
 	/* Keyboard peripheral interfaces. */
@@ -350,18 +342,26 @@
 	/* PSL peripheral interfaces. */
 	/omit-if-no-ref/ psl_in1_gpd2: periph-psl-in1 {
 		pinmux = <&altd_npsl_in1_sl>;
+		psl-offset = <0>;
+		psl-polarity = <&altd_psl_in1_ahi>;
 	};
 
 	/omit-if-no-ref/ psl_in2_gp00: periph-psl-in2 {
 		pinmux = <&altd_npsl_in2_sl>;
+		psl-offset = <1>;
+		psl-polarity = <&altd_psl_in2_ahi>;
 	};
 
 	/omit-if-no-ref/ psl_in3_gp01: periph-psl-in3 {
 		pinmux = <&altd_psl_in3_sl>;
+		psl-offset = <2>;
+		psl-polarity = <&altd_psl_in3_ahi>;
 	};
 
 	/omit-if-no-ref/ psl_in4_gp02: periph-psl-in4 {
 		pinmux = <&altd_psl_in4_sl>;
+		psl-offset = <3>;
+		psl-polarity = <&altd_psl_in4_ahi>;
 	};
 
 	/* UART peripheral interfaces */

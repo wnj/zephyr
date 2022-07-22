@@ -72,6 +72,18 @@ enum {
 	 *  passed to write callback.
 	 */
 	BT_GATT_PERM_PREPARE_WRITE = BIT(6),
+
+	/** @brief Attribute read permission with LE Secure Connection encryption.
+	 *
+	 *  If set, requires that LE Secure Connections is used for read access.
+	 */
+	BT_GATT_PERM_READ_LESC = BIT(7),
+
+	/** @brief Attribute write permission with LE Secure Connection encryption.
+	 *
+	 *  If set, requires that LE Secure Connections is used for write access.
+	 */
+	BT_GATT_PERM_WRITE_LESC = BIT(8),
 };
 
 /** @def BT_GATT_ERR
@@ -151,7 +163,7 @@ struct bt_gatt_attr {
 	/** Attribute handle */
 	uint16_t handle;
 	/** Attribute permissions */
-	uint8_t perm;
+	uint16_t perm;
 };
 
 /** @brief GATT Service structure */
@@ -1007,18 +1019,60 @@ struct bt_gatt_notify_params {
 int bt_gatt_notify_cb(struct bt_conn *conn,
 		      struct bt_gatt_notify_params *params);
 
-/** @brief Notify multiple attribute value change.
+/** @brief Send multiple notifications in a single PDU.
  *
- *  This function works in the same way as @ref bt_gatt_notify_cb.
+ *  The GATT Server will send a single ATT_MULTIPLE_HANDLE_VALUE_NTF PDU
+ *  containing all the notifications passed to this API.
  *
- *  @param conn Connection object.
- *  @param num_params Number of notification parameters.
- *  @param params Array of notification parameters.
+ *  All `params` must have the same `func` and `user_data` (due to
+ *  implementation limitation). But `func(user_data)` will be invoked for each
+ *  parameter.
  *
- *  @return 0 in case of success or negative value in case of error.
+ *  As this API may block to wait for Bluetooth Host resources, it is not
+ *  recommended to call it from a cooperative thread or a Bluetooth callback.
+ *
+ *  The peer's GATT Client must write to this device's Client Supported Features
+ *  attribute and set the bit for Multiple Handle Value Notifications before
+ *  this API can be used.
+ *
+ *  Only use this API to force the use of the ATT_MULTIPLE_HANDLE_VALUE_NTF PDU.
+ *  For standard applications, `bt_gatt_notify_cb` is preferred, as it will use
+ *  this PDU if supported and automatically fallback to ATT_HANDLE_VALUE_NTF
+ *  when not supported by the peer.
+ *
+ *  This API has an additional limitation: it only accepts valid attribute
+ *  references and not UUIDs like `bt_gatt_notify` and `bt_gatt_notify_cb`.
+ *
+ *  @param conn
+ *    Target client.
+ *    Notifying all connected clients by passing `NULL` is not yet supported,
+ *    please use `bt_gatt_notify` instead.
+ *  @param num_params
+ *    Element count of `params` array. Has to be greater than 1.
+ *  @param params
+ *    Array of notification parameters. It is okay to free this after calling
+ *    this function.
+ *
+ *  @retval 0
+ *    Success. The PDU is queued for sending.
+ *  @retval -EINVAL
+ *    - One of the attribute handles is invalid.
+ *    - Only one parameter was passed. This API expects 2 or more.
+ *    - Not all `func` were equal or not all `user_data` were equal.
+ *    - One of the characteristics is not notifiable.
+ *    - An UUID was passed in one of the parameters.
+ *  @retval -ERANGE
+ *    - The notifications cannot all fit in a single ATT_MULTIPLE_HANDLE_VALUE_NTF.
+ *    - They exceed the MTU of all open ATT bearers.
+ *  @retval -EPERM
+ *    The connection has a lower security level than required by one of the
+ *    attributes.
+ *  @retval -EOPNOTSUPP
+ *    The peer hasn't yet communicated that it supports this PDU type.
  */
-int bt_gatt_notify_multiple(struct bt_conn *conn, uint16_t num_params,
-			    struct bt_gatt_notify_params *params);
+int bt_gatt_notify_multiple(struct bt_conn *conn,
+			    uint16_t num_params,
+			    struct bt_gatt_notify_params params[]);
 
 /** @brief Notify attribute value change.
  *
@@ -1257,15 +1311,30 @@ struct bt_gatt_discover_params;
  *  Only the following fields of the attribute contains valid information:
  *   - uuid      UUID representing the type of attribute.
  *   - handle    Handle in the remote database.
- *   - user_data The value of the attribute.
- *               Will be NULL when discovering descriptors
+ *   - user_data The value of the attribute, if the discovery type maps to an
+ *               ATT operation that provides this information. NULL otherwise.
+ *               See below.
  *
- *  To be able to read the value of the discovered attribute the user_data
- *  must be cast to an appropriate type.
- *   - @ref bt_gatt_service_val when UUID is @ref BT_UUID_GATT_PRIMARY or
- *     @ref BT_UUID_GATT_SECONDARY.
- *   - @ref bt_gatt_include when UUID is @ref BT_UUID_GATT_INCLUDE.
- *   - @ref bt_gatt_chrc when UUID is @ref BT_UUID_GATT_CHRC.
+ *  The effective type of @c attr->user_data is determined by @c params. Note
+ *  that the fields @c params->type and @c params->uuid are left unchanged by
+ *  the discovery procedure.
+ *
+ *  @c params->type                      | @c params->uuid         | Type of @c attr->user_data
+ *  -------------------------------------|-------------------------|---------------------------
+ *  @ref BT_GATT_DISCOVER_PRIMARY        | any                     | @ref bt_gatt_service_val
+ *  @ref BT_GATT_DISCOVER_SECONDARY      | any                     | @ref bt_gatt_service_val
+ *  @ref BT_GATT_DISCOVER_INCLUDE        | any                     | @ref bt_gatt_include
+ *  @ref BT_GATT_DISCOVER_CHARACTERISTIC | any                     | @ref bt_gatt_chrc
+ *  @ref BT_GATT_DISCOVER_STD_CHAR_DESC  | @ref BT_UUID_GATT_CEP   | @ref bt_gatt_cep
+ *  @ref BT_GATT_DISCOVER_STD_CHAR_DESC  | @ref BT_UUID_GATT_CCC   | @ref bt_gatt_ccc
+ *  @ref BT_GATT_DISCOVER_STD_CHAR_DESC  | @ref BT_UUID_GATT_SCC   | @ref bt_gatt_scc
+ *  @ref BT_GATT_DISCOVER_STD_CHAR_DESC  | @ref BT_UUID_GATT_CPF   | @ref bt_gatt_cpf
+ *  @ref BT_GATT_DISCOVER_DESCRIPTOR     | any                     | NULL
+ *  @ref BT_GATT_DISCOVER_ATTRIBUTE      | any                     | NULL
+ *
+ *  Also consider if using read-by-type instead of discovery is more convenient.
+ *  See @ref bt_gatt_read with @ref bt_gatt_read_params.handle_count set to
+ *  @c 0.
  *
  *  @return BT_GATT_ITER_CONTINUE to continue discovery procedure.
  *  @return BT_GATT_ITER_STOP to stop discovery procedure.
@@ -1711,7 +1780,7 @@ struct bt_gatt_subscribe_params {
  *  this callback. Notification callback with NULL data will not be called if
  *  subscription was removed by this method.
  *
- *  The Response comes in callback @p params->func. The callback is run from
+ *  The Response comes in callback @p params->subscribe. The callback is run from
  *  the context specified by 'config BT_RECV_CONTEXT'.
  *  @p params must remain valid until start of callback.
  *  The Notification callback @p params->notify is also called from the BT RX

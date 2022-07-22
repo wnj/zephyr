@@ -5,6 +5,7 @@
 
 config SOC_FAMILY_INTEL_ADSP
 	select WINSTREAM
+	select ARCH_SUPPORTS_COREDUMP
 	bool
 
 if SOC_FAMILY_INTEL_ADSP
@@ -19,6 +20,12 @@ config CAVS_IPC
 	help
 	  Driver for the host IPC interrupt delivery mechanism.
 	  Currently SOF has its own driver for this hardware.
+
+config CAVS_CLOCK
+	bool
+	help
+	  Driver for the CAVS clocks. Allow type of clock (and
+	  thus frequency) to be chosen.
 
 config INTEL_ADSP_CAVS
 	bool
@@ -49,22 +56,6 @@ config ADSP_WIN3_OFFSET
 	  Offset of the fourth host shared memory window (used for
 	  printk/log output) within the reserved region at the start
 	  of HP-SRAM.
-
-config IMR_MANIFEST_ADDR
-	hex "Address of boot manifest struct within IMR memory"
-	default 0xb0032000
-	help
-	  Address where the rimage manifest struct is placed upon
-	  boot.  Must be synchronized between Zephyr's linkage, the
-	  hardware, ROM and rimage configuration.  Don't touch except
-	  with great care.
-
-config IMR_DATA_ADDR
-	hex "Address of bootloader .data section within IMR memory"
-	default 0xb0039000
-	help
-	  Location to place .data contents in IMR memory during
-	  bootloader linkage.
 
 config ADSP_TRACE_SIMCALL
 	bool "Emit SIMCALL output in addition to window tracing"

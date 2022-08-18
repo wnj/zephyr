@@ -11,7 +11,11 @@ macro(toolchain_ld_base)
   # TOOLCHAIN_LD_FLAGS comes from compiler/gcc/target.cmake
   # LINKERFLAGPREFIX comes from linker/ld/target.cmake
   zephyr_ld_options(
+    -no-pie
     ${TOOLCHAIN_LD_FLAGS}
+  )
+
+  zephyr_ld_options(
     ${LINKERFLAGPREFIX},--gc-sections
     ${LINKERFLAGPREFIX},--build-id=none
   )

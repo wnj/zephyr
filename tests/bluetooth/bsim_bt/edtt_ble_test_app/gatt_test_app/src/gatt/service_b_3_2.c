@@ -9,19 +9,19 @@
  *  This code is auto-generated from the Excel Workbook
  *  'GATT_Test_Databases.xlsm' Sheet: 'Large Database 2'
  */
-#include <sys/byteorder.h>
-#include <sys/printk.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/printk.h>
 
-#include <bluetooth/gatt.h>
+#include <zephyr/bluetooth/gatt.h>
 
 #include "gatt_macs.h"
 
-/** @def BT_UUID_SERVICE_B_3
+/**
  *  @brief UUID for the Service B.3
  */
 #define BT_UUID_SERVICE_B_3             BT_UUID_DECLARE_16(0xa00b)
 
-/** @def BT_UUID_VALUE_V6
+/**
  *  @brief UUID for the Value V6 Characteristic
  */
 #define BT_UUID_VALUE_V6                BT_UUID_DECLARE_16(0xb006)
@@ -147,7 +147,8 @@ void service_b_3_2_value_v6_notify(void)
  *             BT_GATT_ERR() with a specific ATT error code.
  */
 static void value_v6_indicate_cb(struct bt_conn *conn,
-				 const struct bt_gatt_attr *attr, uint8_t err)
+				 struct bt_gatt_indicate_params *params,
+				 uint8_t err)
 {
 	printk("Indication for attribute 'Value V6' %s\n",
 	       (err) ? "failed" : "succeded");
@@ -167,6 +168,7 @@ void service_b_3_2_value_v6_indicate(void)
 	 */
 	ind_params.attr = &service_b_3_2_attrs[2];
 	ind_params.func = value_v6_indicate_cb;
+	ind_params.destroy = NULL;
 	ind_params.data = &value_v6_value;
 	ind_params.len = sizeof(value_v6_value);
 

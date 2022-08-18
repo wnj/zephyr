@@ -8,9 +8,6 @@ include: base.yaml
 bus: dma
 
 properties:
-    label:
-      required: true
-
     "#dma-cells":
       type: int
       required: true
@@ -19,7 +16,7 @@ properties:
     dma-channel-mask:
       type: int
       required: false
-      description: >
+      description: |
         Bitmask of available DMA channels in ascending order that are
         not reserved by firmware and are available to the
         kernel. i.e. first channel corresponds to LSB.
@@ -33,3 +30,8 @@ properties:
       type: int
       required: false
       description: Number of DMA request signals supported by the controller.
+
+    dma-buf-alignment:
+      type: int
+      required: false
+      description: Memory alignment requirement for DMA buffers used by the controller.

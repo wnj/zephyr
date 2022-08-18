@@ -26,7 +26,7 @@ This document covers guidelines for the `Zephyr Project`_, from a
 security perspective.  Many of the ideas contained herein are captured
 from other open source efforts.
 
-.. todo: Reference master document here
+.. todo: Reference main document here
 
 .. _Zephyr Project: https://www.zephyrproject.org/
 
@@ -238,11 +238,11 @@ mainline code until the security issues have been addressed.
 Issues and Bug Tracking
 ***********************
 
-The Zephyr project shall have an issue tracking system (such as JIRA_)
+The Zephyr project shall have an issue tracking system (such as GitHub_)
 that can be used to record and track defects that are found in the
 system.
 
-.. _JIRA: https://www.atlassian.com/software/jira
+.. _GitHub: https://www.github.com
 
 Because security issues are often sensitive, this issue tracking
 system shall have a field to indicate a security issue.  Setting this

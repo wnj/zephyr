@@ -3,16 +3,16 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include <kernel.h>
+#include <zephyr/kernel.h>
 #include <errno.h>
 #include <string.h>
-#include <sys/printk.h>
-#include <posix/time.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/posix/time.h>
 
 #define ACTIVE 1
 #define NOT_ACTIVE 0
 
-static void zephyr_timer_wrapper(struct k_timer *timer);
+static void zephyr_timer_wrapper(struct k_timer *ztimer);
 
 struct timer_obj {
 	struct k_timer ztimer;
@@ -157,7 +157,7 @@ int timer_settime(timer_t timerid, int flags, const struct itimerspec *value,
 	timer->interval.tv_sec = value->it_interval.tv_sec;
 	timer->interval.tv_nsec = value->it_interval.tv_nsec;
 
-	/* Calcaulte timer duration */
+	/* Calculate timer duration */
 	duration = _ts_to_ms(&(value->it_value));
 	if ((flags & TIMER_ABSTIME) != 0) {
 		current = k_timer_remaining_get(&timer->ztimer);

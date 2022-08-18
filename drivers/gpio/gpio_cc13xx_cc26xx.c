@@ -7,10 +7,11 @@
 #define DT_DRV_COMPAT ti_cc13xx_cc26xx_gpio
 
 #include <zephyr/types.h>
-#include <sys/__assert.h>
-#include <device.h>
+#include <zephyr/sys/__assert.h>
+#include <zephyr/device.h>
 #include <errno.h>
-#include <drivers/gpio.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/dt-bindings/gpio/ti-cc13xx-cc26xx-gpio.h>
 
 #include <driverlib/gpio.h>
 #include <driverlib/interrupt.h>
@@ -70,11 +71,25 @@ static int gpio_cc13xx_cc26xx_config(const struct device *port,
 		return -ENOTSUP;
 	}
 
-	config |= IOC_CURRENT_2MA | IOC_STRENGTH_AUTO | IOC_SLEW_DISABLE |
-		 IOC_NO_WAKE_UP;
+	config |= IOC_SLEW_DISABLE | IOC_NO_WAKE_UP;
 
-	config |= (flags & GPIO_INT_DEBOUNCE) ? IOC_HYST_ENABLE :
-							IOC_HYST_DISABLE;
+	config |= (flags & CC13XX_CC26XX_GPIO_DEBOUNCE) ?
+		IOC_HYST_ENABLE : IOC_HYST_DISABLE;
+
+	switch (flags & CC13XX_CC26XX_GPIO_DS_MASK) {
+	case CC13XX_CC26XX_GPIO_DS_DFLT:
+		config |= IOC_CURRENT_2MA | IOC_STRENGTH_AUTO;
+		break;
+	case CC13XX_CC26XX_GPIO_DS_ALT:
+		/*
+		 * Not all GPIO support 8ma, but setting that bit will use the
+		 * highest supported drive strength.
+		 */
+		config |= IOC_CURRENT_8MA | IOC_STRENGTH_MAX;
+		break;
+	default:
+		return -ENOTSUP;
+	}
 
 	switch (flags & (GPIO_PULL_UP | GPIO_PULL_DOWN)) {
 	case 0:
@@ -196,8 +211,6 @@ static uint32_t gpio_cc13xx_cc26xx_get_pending_int(const struct device *dev)
 	return GPIO_getEventMultiDio(GPIO_DIO_ALL_MASK);
 }
 
-DEVICE_DECLARE(gpio_cc13xx_cc26xx);
-
 static void gpio_cc13xx_cc26xx_isr(const struct device *dev)
 {
 	struct gpio_cc13xx_cc26xx_data *data = dev->data;
@@ -211,7 +224,7 @@ static void gpio_cc13xx_cc26xx_isr(const struct device *dev)
 
 static int gpio_cc13xx_cc26xx_init(const struct device *dev)
 {
-#ifdef CONFIG_SYS_POWER_MANAGEMENT
+#ifdef CONFIG_PM
 	/* Set dependency on gpio resource to turn on power domains */
 	Power_setDependency(PowerCC26XX_PERIPH_GPIO);
 #else
@@ -237,17 +250,51 @@ static int gpio_cc13xx_cc26xx_init(const struct device *dev)
 	/* Enable IRQ */
 	IRQ_CONNECT(DT_INST_IRQN(0),
 		    DT_INST_IRQ(0, priority),
-		    gpio_cc13xx_cc26xx_isr, DEVICE_GET(gpio_cc13xx_cc26xx), 0);
+		    gpio_cc13xx_cc26xx_isr, DEVICE_DT_INST_GET(0), 0);
 	irq_enable(DT_INST_IRQN(0));
 
 	/* Peripheral should not be accessed until power domain is on. */
-	while (PRCMPowerDomainStatus(PRCM_DOMAIN_PERIPH) !=
+	while (PRCMPowerDomainsAllOn(PRCM_DOMAIN_PERIPH) !=
 	       PRCM_DOMAIN_POWER_ON) {
 		continue;
 	}
 
 	return 0;
 }
+
+#ifdef CONFIG_GPIO_GET_DIRECTION
+static int gpio_cc13xx_cc26xx_port_get_direction(const struct device *port, gpio_port_pins_t map,
+						 gpio_port_pins_t *inputs,
+						 gpio_port_pins_t *outputs)
+{
+	uint32_t pin;
+	gpio_port_pins_t ip = 0;
+	gpio_port_pins_t op = 0;
+	const struct gpio_driver_config *cfg = port->config;
+
+	map &= cfg->port_pin_mask;
+
+	if (inputs != NULL) {
+		for (pin = find_lsb_set(map) - 1; map;
+		     map &= ~BIT(pin), pin = find_lsb_set(map) - 1) {
+			ip |= !!(IOCPortConfigureGet(pin) & IOC_INPUT_ENABLE) * BIT(pin);
+		}
+
+		*inputs = ip;
+	}
+
+	if (outputs != NULL) {
+		for (pin = find_lsb_set(map) - 1; map;
+		     map &= ~BIT(pin), pin = find_lsb_set(map) - 1) {
+			op |= GPIO_getOutputEnableDio(pin) * BIT(pin);
+		}
+
+		*outputs = op;
+	}
+
+	return 0;
+}
+#endif /* CONFIG_GPIO_GET_DIRECTION */
 
 static const struct gpio_driver_api gpio_cc13xx_cc26xx_driver_api = {
 	.pin_configure = gpio_cc13xx_cc26xx_config,
@@ -258,11 +305,14 @@ static const struct gpio_driver_api gpio_cc13xx_cc26xx_driver_api = {
 	.port_toggle_bits = gpio_cc13xx_cc26xx_port_toggle_bits,
 	.pin_interrupt_configure = gpio_cc13xx_cc26xx_pin_interrupt_configure,
 	.manage_callback = gpio_cc13xx_cc26xx_manage_callback,
-	.get_pending_int = gpio_cc13xx_cc26xx_get_pending_int
+	.get_pending_int = gpio_cc13xx_cc26xx_get_pending_int,
+#ifdef CONFIG_GPIO_GET_DIRECTION
+	.port_get_direction = gpio_cc13xx_cc26xx_port_get_direction,
+#endif /* CONFIG_GPIO_GET_DIRECTION */
 };
 
-DEVICE_AND_API_INIT(gpio_cc13xx_cc26xx, DT_INST_LABEL(0),
-		    gpio_cc13xx_cc26xx_init, &gpio_cc13xx_cc26xx_data_0,
+DEVICE_DT_INST_DEFINE(0, gpio_cc13xx_cc26xx_init,
+		    NULL, &gpio_cc13xx_cc26xx_data_0,
 		    &gpio_cc13xx_cc26xx_cfg_0,
-		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    PRE_KERNEL_1, CONFIG_GPIO_INIT_PRIORITY,
 		    &gpio_cc13xx_cc26xx_driver_api);

@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define DT_DRV_COMPAT grove_light
+#define DT_DRV_COMPAT seeed_grove_light
 
-#include <drivers/adc.h>
-#include <device.h>
+#include <zephyr/drivers/adc.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <math.h>
-#include <drivers/sensor.h>
-#include <zephyr.h>
-#include <logging/log.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(grove_light, CONFIG_SENSOR_LOG_LEVEL);
 
@@ -34,7 +35,7 @@ struct gls_data {
 };
 
 struct gls_config {
-	const char *adc_label;
+	const struct device *adc;
 	uint8_t adc_channel;
 };
 
@@ -50,9 +51,9 @@ static struct adc_sequence adc_table = {
 static int gls_sample_fetch(const struct device *dev,
 			    enum sensor_channel chan)
 {
-	struct gls_data *drv_data = dev->data;
+	const struct gls_config *cfg = dev->config;
 
-	return adc_read(drv_data->adc, &adc_table);
+	return adc_read(cfg->adc, &adc_table);
 }
 
 static int gls_channel_get(const struct device *dev,
@@ -87,10 +88,8 @@ static int gls_init(const struct device *dev)
 	struct gls_data *drv_data = dev->data;
 	const struct gls_config *cfg = dev->config;
 
-	drv_data->adc = device_get_binding(cfg->adc_label);
-
-	if (drv_data->adc == NULL) {
-		LOG_ERR("Failed to get ADC device.");
+	if (!device_is_ready(cfg->adc)) {
+		LOG_ERR("ADC device is not ready.");
 		return -EINVAL;
 	}
 
@@ -109,17 +108,21 @@ static int gls_init(const struct device *dev)
 	adc_table.resolution = GROVE_RESOLUTION;
 	adc_table.channels = BIT(cfg->adc_channel);
 
-	adc_channel_setup(drv_data->adc, &drv_data->ch_cfg);
+	adc_channel_setup(cfg->adc, &drv_data->ch_cfg);
 
 	return 0;
 }
 
-static struct gls_data gls_data;
-static const struct gls_config gls_cfg = {
-	.adc_label = DT_INST_IO_CHANNELS_LABEL(0),
-	.adc_channel = DT_INST_IO_CHANNELS_INPUT(0),
-};
+#define GLS_DEFINE(inst)							\
+	static struct gls_data gls_data_##inst;					\
+										\
+	static const struct gls_config gls_cfg_##inst = {			\
+		.adc = DEVICE_DT_GET(DT_INST_IO_CHANNELS_CTLR(inst)),		\
+		.adc_channel = DT_INST_IO_CHANNELS_INPUT(inst),			\
+	};									\
+										\
+	DEVICE_DT_INST_DEFINE(inst, &gls_init, NULL,				\
+			      &gls_data_##inst, &gls_cfg_##inst, POST_KERNEL,	\
+			      CONFIG_SENSOR_INIT_PRIORITY, &gls_api);		\
 
-DEVICE_AND_API_INIT(gls_dev, DT_INST_LABEL(0), &gls_init,
-		&gls_data, &gls_cfg, POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY,
-		&gls_api);
+DT_INST_FOREACH_STATUS_OKAY(GLS_DEFINE)

@@ -33,7 +33,7 @@ The CPU provides support for the following devices:
      nRF21540 DK (Credit: Nordic Semiconductor)
 
 More information about the board can be found at the `nRF21540 website`_.
-The `Nordic Semiconductor Infocenter`_ contains the processor'sand front end
+The `Nordic Semiconductor Infocenter`_ contains the processor's and front end
 module's information and the datasheet.
 
 Hardware
@@ -83,7 +83,7 @@ hardware features:
 | WDT       | on-chip    | watchdog             |
 +-----------+------------+----------------------+
 
-Other hardware features are not supported by the Zephyr kernel.
+Other hardware features have not been enabled yet for this board.
 See `nRF52840 Product Specification`_ and `Nordic Semiconductor Infocenter`_
 for a complete list of nRF21540 Development Kit board hardware features.
 
@@ -110,8 +110,8 @@ Push buttons
 Front End Module
 ----------------
 
-* MISO        = P1.13
-* MOSI        = P1.14
+* MOSI        = P1.13
+* MISO        = P1.14
 * CLOCK       = P1.15
 * CHIP SELECT = P0.21
 * PDN         = P0.23
@@ -123,10 +123,9 @@ Front End Module
 Programming and Debugging
 *************************
 
-Applications for the ``nrf21540dk_nrf52840`` board configuration can be
-built and flashed in the usual way (see :ref:`build_an_application`
-and :ref:`application_run` for more details); however, the standard
-debugging targets are not currently available.
+Applications for the ``nrf21540dk_nrf52840`` board configuration can be built,
+flashed, and debugged in the usual way. See :ref:`build_an_application` and
+:ref:`application_run` for more details on building and running.
 
 Flashing
 ========
@@ -145,7 +144,7 @@ First, run your favorite terminal program to listen for output.
 
    $ minicom -D <tty_device> -b 115200
 
-Replace :code:`<tty_device>` with the port where the board nRF52840 DK
+Replace :code:`<tty_device>` with the port where the board nRF21540 DK
 can be found. For example, under Linux, :code:`/dev/ttyACM0`.
 
 Then build and flash the application in the usual way.
@@ -185,46 +184,48 @@ more than one UART for connecting peripheral devices:
 
 1. Add devicetree overlay file to the main directory of your application:
 
-   .. code-block:: console
+   .. code-block:: devicetree
 
-      $ cat nrf21540dk_nrf52840.overlay
+      &pinctrl {
+         uart1_default: uart1_default {
+            group1 {
+               psels = <NRF_PSEL(UART_TX, 0, 14)>,
+                       <NRF_PSEL(UART_RX, 0, 16)>;
+            };
+         };
+         /* required if CONFIG_PM_DEVICE=y */
+         uart1_sleep: uart1_sleep {
+            group1 {
+               psels = <NRF_PSEL(UART_TX, 0, 14)>,
+                       <NRF_PSEL(UART_RX, 0, 16)>;
+               low-power-enable;
+            };
+         };
+      };
+
       &uart1 {
         compatible = "nordic,nrf-uarte";
         current-speed = <115200>;
         status = "okay";
-        tx-pin = <14>;
-        rx-pin = <16>;
+        pinctrl-0 = <&uart1_default>;
+        pinctrl-1 = <&uart1_sleep>;
+        pinctrl-names = "default", "sleep";
       };
 
    In the overlay file above, pin P0.16 is used for RX and P0.14 is used for TX
 
-2. Use the UART1 as ``device_get_binding(DT_LABEL(DT_NODELABEL(uart1)))``
+2. Use the UART1 as ``DEVICE_DT_GET(DT_NODELABEL(uart1))``
 
-Overlay file naming
-===================
-
-The file has to be named ``<board>.overlay`` and placed in the app main directory to be
-picked up automatically by the build system.
+See :ref:`set-devicetree-overlays` for further details.
 
 Selecting the pins
 ==================
-To select the pin numbers for tx-pin and rx-pin:
 
-.. code-block:: console
-
-   tx-pin = <pin_no>
-
-Open the `nRF52840 Product Specification`_, chapter 7 'Hardware and Layout'.
+Pins can be configured in the board pinctrl file. To see the available mappings,
+open the `nRF52840 Product Specification`_, chapter 7 'Hardware and Layout'.
 In the table 7.1.1 'aQFN73 ball assignments' select the pins marked
 'General purpose I/O'.  Note that pins marked as 'low frequency I/O only' can only be used
 in under-10KHz applications. They are not suitable for 115200 speed of UART.
-
-Translate the 'Pin' into number for devicetree by using the following formula::
-
-   pin_no = b\*32 + a
-
-where ``a`` and ``b`` are from the Pin value in the table (Pb.a).
-For example, for P0.1, ``pin_no = 1`` and for P1.0, ``pin_no = 32``.
 
 References
 **********

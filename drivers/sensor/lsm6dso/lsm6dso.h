@@ -11,22 +11,21 @@
 #ifndef ZEPHYR_DRIVERS_SENSOR_LSM6DSO_LSM6DSO_H_
 #define ZEPHYR_DRIVERS_SENSOR_LSM6DSO_LSM6DSO_H_
 
-#include <drivers/sensor.h>
+#include <zephyr/drivers/sensor.h>
 #include <zephyr/types.h>
-#include <drivers/gpio.h>
-#include <drivers/spi.h>
-#include <sys/util.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/spi.h>
+#include <zephyr/sys/util.h>
+#include <stmemsc.h>
 #include "lsm6dso_reg.h"
 
-union axis3bit16_t {
-	int16_t i16bit[3];
-	uint8_t u8bit[6];
-};
+#if DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
+#include <zephyr/drivers/spi.h>
+#endif /* DT_ANY_INST_ON_BUS_STATUS_OKAY(spi) */
 
-union axis1bit16_t {
-	int16_t i16bit;
-	uint8_t u8bit[2];
-};
+#if DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c)
+#include <zephyr/drivers/i2c.h>
+#endif /* DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c) */
 
 #define LSM6DSO_EN_BIT					0x01
 #define LSM6DSO_DIS_BIT					0x00
@@ -41,75 +40,29 @@ union axis1bit16_t {
 #define SENSOR_DEG2RAD_DOUBLE			(SENSOR_PI_DOUBLE / 180)
 #define SENSOR_G_DOUBLE				(SENSOR_G / 1000000.0)
 
-#if CONFIG_LSM6DSO_ACCEL_FS == 0
-	#define LSM6DSO_ACCEL_FS_RUNTIME 1
-	#define LSM6DSO_DEFAULT_ACCEL_FULLSCALE		0
-	#define LSM6DSO_DEFAULT_ACCEL_SENSITIVITY	GAIN_UNIT_XL
-#elif CONFIG_LSM6DSO_ACCEL_FS == 2
-	#define LSM6DSO_DEFAULT_ACCEL_FULLSCALE		0
-	#define LSM6DSO_DEFAULT_ACCEL_SENSITIVITY	GAIN_UNIT_XL
-#elif CONFIG_LSM6DSO_ACCEL_FS == 4
-	#define LSM6DSO_DEFAULT_ACCEL_FULLSCALE		2
-	#define LSM6DSO_DEFAULT_ACCEL_SENSITIVITY	(2.0 * GAIN_UNIT_XL)
-#elif CONFIG_LSM6DSO_ACCEL_FS == 8
-	#define LSM6DSO_DEFAULT_ACCEL_FULLSCALE		3
-	#define LSM6DSO_DEFAULT_ACCEL_SENSITIVITY	(4.0 * GAIN_UNIT_XL)
-#elif CONFIG_LSM6DSO_ACCEL_FS == 16
-	#define LSM6DSO_DEFAULT_ACCEL_FULLSCALE		1
-	#define LSM6DSO_DEFAULT_ACCEL_SENSITIVITY	(8.0 * GAIN_UNIT_XL)
-#endif
-
-#if (CONFIG_LSM6DSO_ACCEL_ODR == 0)
-#define LSM6DSO_ACCEL_ODR_RUNTIME 1
-#endif
-
-#define GYRO_FULLSCALE_125 4
-
-#if CONFIG_LSM6DSO_GYRO_FS == 0
-	#define LSM6DSO_GYRO_FS_RUNTIME 1
-	#define LSM6DSO_DEFAULT_GYRO_FULLSCALE		4
-	#define LSM6DSO_DEFAULT_GYRO_SENSITIVITY	GAIN_UNIT_G
-#elif CONFIG_LSM6DSO_GYRO_FS == 125
-	#define LSM6DSO_DEFAULT_GYRO_FULLSCALE		4
-	#define LSM6DSO_DEFAULT_GYRO_SENSITIVITY	GAIN_UNIT_G
-#elif CONFIG_LSM6DSO_GYRO_FS == 250
-	#define LSM6DSO_DEFAULT_GYRO_FULLSCALE		0
-	#define LSM6DSO_DEFAULT_GYRO_SENSITIVITY	(2.0 * GAIN_UNIT_G)
-#elif CONFIG_LSM6DSO_GYRO_FS == 500
-	#define LSM6DSO_DEFAULT_GYRO_FULLSCALE		1
-	#define LSM6DSO_DEFAULT_GYRO_SENSITIVITY	(4.0 * GAIN_UNIT_G)
-#elif CONFIG_LSM6DSO_GYRO_FS == 1000
-	#define LSM6DSO_DEFAULT_GYRO_FULLSCALE		2
-	#define LSM6DSO_DEFAULT_GYRO_SENSITIVITY	(8.0 * GAIN_UNIT_G)
-#elif CONFIG_LSM6DSO_GYRO_FS == 2000
-	#define LSM6DSO_DEFAULT_GYRO_FULLSCALE		3
-	#define LSM6DSO_DEFAULT_GYRO_SENSITIVITY	(16.0 * GAIN_UNIT_G)
-#endif
-
-
-#if (CONFIG_LSM6DSO_GYRO_ODR == 0)
-#define LSM6DSO_GYRO_ODR_RUNTIME 1
-#endif
-
 struct lsm6dso_config {
-	char *bus_name;
-	int (*bus_init)(const struct device *dev);
-#ifdef CONFIG_LSM6DSO_TRIGGER
-	const char *int_gpio_port;
-	uint8_t int_gpio_pin;
-	uint8_t int_gpio_flags;
-	uint8_t int_pin;
-#endif /* CONFIG_LSM6DSO_TRIGGER */
+	stmdev_ctx_t ctx;
+	union {
 #if DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c)
-	uint16_t i2c_slv_addr;
-#elif DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
-	struct spi_config spi_conf;
-#if DT_INST_SPI_DEV_HAS_CS_GPIOS(0)
-	const char *gpio_cs_port;
-	uint8_t cs_gpio;
-	uint8_t cs_gpio_flags;
-#endif /* DT_INST_SPI_DEV_HAS_CS_GPIOS(0) */
-#endif /* DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c) */
+		const struct i2c_dt_spec i2c;
+#endif
+#if DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
+		const struct spi_dt_spec spi;
+#endif
+	} stmemsc_cfg;
+	uint8_t accel_pm;
+	uint8_t accel_odr;
+#define ACCEL_RANGE_DOUBLE	BIT(7)
+#define ACCEL_RANGE_MASK	BIT_MASK(6)
+	uint8_t accel_range;
+	uint8_t gyro_pm;
+	uint8_t gyro_odr;
+	uint8_t gyro_range;
+#ifdef CONFIG_LSM6DSO_TRIGGER
+	const struct gpio_dt_spec gpio_drdy;
+	uint8_t int_pin;
+	bool trig_enabled;
+#endif /* CONFIG_LSM6DSO_TRIGGER */
 };
 
 union samples {
@@ -119,33 +72,16 @@ union samples {
 	};
 } __aligned(2);
 
-/* sensor data forward declaration (member definition is below) */
-struct lsm6dso_data;
-
-struct lsm6dso_tf {
-	int (*read_data)(struct lsm6dso_data *data, uint8_t reg_addr,
-			 uint8_t *value, uint8_t len);
-	int (*write_data)(struct lsm6dso_data *data, uint8_t reg_addr,
-			  uint8_t *value, uint8_t len);
-	int (*read_reg)(struct lsm6dso_data *data, uint8_t reg_addr,
-			uint8_t *value);
-	int (*write_reg)(struct lsm6dso_data *data, uint8_t reg_addr,
-			uint8_t value);
-	int (*update_reg)(struct lsm6dso_data *data, uint8_t reg_addr,
-			  uint8_t mask, uint8_t value);
-};
-
 #define LSM6DSO_SHUB_MAX_NUM_SLVS			2
 
 struct lsm6dso_data {
 	const struct device *dev;
-	const struct device *bus;
 	int16_t acc[3];
 	uint32_t acc_gain;
 	int16_t gyro[3];
 	uint32_t gyro_gain;
 #if defined(CONFIG_LSM6DSO_ENABLE_TEMP)
-	int temp_sample;
+	int16_t temp_sample;
 #endif
 #if defined(CONFIG_LSM6DSO_SENSORHUB)
 	uint8_t ext_data[2][6];
@@ -157,15 +93,10 @@ struct lsm6dso_data {
 		int16_t y0;
 		int16_t y1;
 	} hts221;
+	bool shub_inited;
+	uint8_t num_ext_dev;
+	uint8_t shub_ext[LSM6DSO_SHUB_MAX_NUM_SLVS];
 #endif /* CONFIG_LSM6DSO_SENSORHUB */
-
-	stmdev_ctx_t *ctx;
-
-	#if DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c)
-	stmdev_ctx_t ctx_i2c;
-	#elif DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
-	stmdev_ctx_t ctx_spi;
-	#endif
 
 	uint16_t accel_freq;
 	uint8_t accel_fs;
@@ -173,7 +104,6 @@ struct lsm6dso_data {
 	uint8_t gyro_fs;
 
 #ifdef CONFIG_LSM6DSO_TRIGGER
-	const struct device *gpio;
 	struct gpio_callback gpio_cb;
 	sensor_trigger_handler_t handler_drdy_acc;
 	sensor_trigger_handler_t handler_drdy_gyr;
@@ -187,18 +117,12 @@ struct lsm6dso_data {
 	struct k_work work;
 #endif
 #endif /* CONFIG_LSM6DSO_TRIGGER */
-
-#if DT_INST_SPI_DEV_HAS_CS_GPIOS(0)
-	struct spi_cs_control cs_ctrl;
-#endif
 };
 
-int lsm6dso_spi_init(const struct device *dev);
-int lsm6dso_i2c_init(const struct device *dev);
 #if defined(CONFIG_LSM6DSO_SENSORHUB)
 int lsm6dso_shub_init(const struct device *dev);
 int lsm6dso_shub_fetch_external_devs(const struct device *dev);
-int lsm6dso_shub_get_idx(enum sensor_channel type);
+int lsm6dso_shub_get_idx(const struct device *dev, enum sensor_channel type);
 int lsm6dso_shub_config(const struct device *dev, enum sensor_channel chan,
 			enum sensor_attribute attr,
 			const struct sensor_value *val);

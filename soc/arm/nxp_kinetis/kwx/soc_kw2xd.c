@@ -6,15 +6,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <kernel.h>
-#include <device.h>
-#include <init.h>
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/init.h>
 #include <soc.h>
-#include <drivers/uart.h>
+#include <zephyr/drivers/uart.h>
 #include <fsl_common.h>
 #include <fsl_clock.h>
-#include <arch/cpu.h>
-#include <arch/arm/aarch32/cortex_m/cmsis.h>
+#include <zephyr/arch/cpu.h>
+#include <zephyr/arch/arm/aarch32/cortex_m/cmsis.h>
 
 #define PLLFLLSEL_MCGFLLCLK	(0)
 #define PLLFLLSEL_MCGPLLCLK	(1)
@@ -25,6 +25,12 @@
 #define ER32KSEL_LPO1KHZ	(3)
 
 #define TIMESRC_OSCERCLK        (2)
+
+#define CLOCK_NODEID(clk) \
+	DT_CHILD(DT_INST(0, nxp_kinetis_sim), clk)
+
+#define CLOCK_DIVIDER(clk) \
+	DT_PROP_OR(CLOCK_NODEID(clk), clock_div, 1) - 1
 
 static const osc_config_t oscConfig = {
 	.freq = CONFIG_OSC_XTAL0_FREQ,
@@ -58,9 +64,9 @@ static const mcg_pll_config_t pll0Config = {
 static const sim_clock_config_t simConfig = {
 	.pllFllSel = PLLFLLSEL_MCGPLLCLK, /* PLLFLLSEL select PLL. */
 	.er32kSrc = ER32KSEL_RTC,         /* ERCLK32K selection, use RTC. */
-	.clkdiv1 = SIM_CLKDIV1_OUTDIV1(CONFIG_KW2XD_CORE_CLOCK_DIVIDER - 1) |
-		   SIM_CLKDIV1_OUTDIV2(CONFIG_KW2XD_BUS_CLOCK_DIVIDER - 1) |
-		   SIM_CLKDIV1_OUTDIV4(CONFIG_KW2XD_FLASH_CLOCK_DIVIDER - 1),
+	.clkdiv1 = SIM_CLKDIV1_OUTDIV1(CLOCK_DIVIDER(core_clk)) |
+		   SIM_CLKDIV1_OUTDIV2(CLOCK_DIVIDER(bus_clk)) |
+		   SIM_CLKDIV1_OUTDIV4(CLOCK_DIVIDER(flash_clk)),
 };
 
 /**
@@ -73,8 +79,6 @@ static const sim_clock_config_t simConfig = {
  * output of the transceiver at 4 MHz. The default frequency of the CLK_OUT
  * depends on the state of GPIO5 during transceiver reset. The frequency
  * will be 4 MHz if the GPIO5 pin is low, otherwise it will be 32.78689 kHz.
- *
- * @return N/A
  *
  */
 static void set_modem_clock(void)
@@ -111,8 +115,6 @@ static void set_modem_clock(void)
  * PLL Bypassed External (PBE) modes to get to the desired
  * PLL Engaged External (PEE) mode and generate the maximum 48 MHz system
  * clock.
- *
- * @return N/A
  *
  */
 static ALWAYS_INLINE void clock_init(void)

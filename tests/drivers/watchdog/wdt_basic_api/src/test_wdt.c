@@ -57,10 +57,9 @@
  * @}
  */
 
-#include <drivers/watchdog.h>
-#include <zephyr.h>
-#include <ztest.h>
-#include "test_wdt.h"
+#include <zephyr/drivers/watchdog.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/ztest.h>
 
 /*
  * To use this test, either the devicetree's /aliases must have a
@@ -71,10 +70,14 @@
 #define WDT_NODE DT_ALIAS(watchdog0)
 #elif DT_HAS_COMPAT_STATUS_OKAY(st_stm32_window_watchdog)
 #define WDT_NODE DT_INST(0, st_stm32_window_watchdog)
+#define TIMEOUTS 0
+#define WDT_TEST_MAX_WINDOW 200
 #elif DT_HAS_COMPAT_STATUS_OKAY(st_stm32_watchdog)
 #define WDT_NODE DT_INST(0, st_stm32_watchdog)
-#elif DT_HAS_COMPAT_STATUS_OKAY(nordic_nrf_watchdog)
-#define WDT_NODE DT_INST(0, nordic_nrf_watchdog)
+#define TIMEOUTS 0
+#elif DT_HAS_COMPAT_STATUS_OKAY(nordic_nrf_wdt)
+#define WDT_NODE DT_INST(0, nordic_nrf_wdt)
+#define TIMEOUTS 2
 #elif DT_HAS_COMPAT_STATUS_OKAY(espressif_esp32_watchdog)
 #define WDT_NODE DT_INST(0, espressif_esp32_watchdog)
 #elif DT_HAS_COMPAT_STATUS_OKAY(silabs_gecko_wdog)
@@ -83,13 +86,18 @@
 #define WDT_NODE DT_INST(0, nxp_kinetis_wdog32)
 #elif DT_HAS_COMPAT_STATUS_OKAY(microchip_xec_watchdog)
 #define WDT_NODE DT_INST(0, microchip_xec_watchdog)
+#elif DT_HAS_COMPAT_STATUS_OKAY(nuvoton_npcx_watchdog)
+#define WDT_NODE DT_INST(0, nuvoton_npcx_watchdog)
+#elif DT_HAS_COMPAT_STATUS_OKAY(ti_cc32xx_watchdog)
+#define WDT_NODE DT_INST(0, ti_cc32xx_watchdog)
+#elif DT_HAS_COMPAT_STATUS_OKAY(nxp_imx_wdog)
+#define WDT_NODE DT_INST(0, nxp_imx_wdog)
+#elif DT_HAS_COMPAT_STATUS_OKAY(zephyr_counter_watchdog)
+#define WDT_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(zephyr_counter_watchdog)
 #endif
-
-#ifdef WDT_NODE
-#define WDT_DEV_NAME DT_LABEL(WDT_NODE)
-#else
-#define WDT_DEV_NAME ""
-#error "Unsupported SoC and no watchdog0 alias in zephyr.dts"
+#if DT_HAS_COMPAT_STATUS_OKAY(raspberrypi_pico_watchdog)
+#define WDT_TEST_MAX_WINDOW 20000U
+#define TIMEOUTS 0
 #endif
 
 #define WDT_TEST_STATE_IDLE        0
@@ -98,11 +106,11 @@
 #define WDT_TEST_CB0_TEST_VALUE    0x0CB0
 #define WDT_TEST_CB1_TEST_VALUE    0x0CB1
 
-#ifdef CONFIG_WDT_NRFX
-#define TIMEOUTS                   2
-#elif defined(CONFIG_IWDG_STM32)
-#define TIMEOUTS                   0
-#else
+#ifndef WDT_TEST_MAX_WINDOW
+#define WDT_TEST_MAX_WINDOW                2000U
+#endif
+
+#ifndef TIMEOUTS
 #define TIMEOUTS                   1
 #endif
 
@@ -125,20 +133,26 @@ static struct wdt_timeout_cfg m_cfg_wdt1;
 #define DATATYPE uint32_t
 #endif
 
+#if DT_NODE_HAS_STATUS(DT_CHOSEN(zephyr_dtcm), okay)
+#define NOINIT_SECTION ".dtcm_noinit.test_wdt"
+#else
+#define NOINIT_SECTION ".noinit.test_wdt"
+#endif
+
 /* m_state indicates state of particular test. Used to check whether testcase
  * should go to reset state or check other values after reset.
  */
-volatile DATATYPE m_state __attribute__((section(".noinit.test_wdt")));
+volatile DATATYPE m_state __attribute__((section(NOINIT_SECTION)));
 
 /* m_testcase_index is incremented after each test to make test possible
  * switch to next testcase.
  */
-volatile DATATYPE m_testcase_index __attribute__((section(".noinit.test_wdt")));
+volatile DATATYPE m_testcase_index __attribute__((section(NOINIT_SECTION)));
 
 /* m_testvalue contains value set in interrupt callback to point whether
  * first or second interrupt was fired.
  */
-volatile DATATYPE m_testvalue __attribute__((section(".noinit.test_wdt")));
+volatile DATATYPE m_testvalue __attribute__((section(NOINIT_SECTION)));
 
 #if TEST_WDT_CALLBACK_1
 static void wdt_int_cb0(const struct device *wdt_dev, int channel_id)
@@ -161,10 +175,10 @@ static void wdt_int_cb1(const struct device *wdt_dev, int channel_id)
 static int test_wdt_no_callback(void)
 {
 	int err;
-	const struct device *wdt = device_get_binding(WDT_DEV_NAME);
+	const struct device *wdt = DEVICE_DT_GET(WDT_NODE);
 
-	if (!wdt) {
-		TC_PRINT("Cannot get WDT device\n");
+	if (!device_is_ready(wdt)) {
+		TC_PRINT("WDT device is not ready\n");
 		return TC_FAIL;
 	}
 
@@ -179,13 +193,13 @@ static int test_wdt_no_callback(void)
 
 	m_cfg_wdt0.callback = NULL;
 	m_cfg_wdt0.flags = WDT_FLAG_RESET_SOC;
-	m_cfg_wdt0.window.max = 2000U;
+	m_cfg_wdt0.window.max = WDT_TEST_MAX_WINDOW;
 	err = wdt_install_timeout(wdt, &m_cfg_wdt0);
 	if (err < 0) {
 		TC_PRINT("Watchdog install error\n");
 	}
 
-	err = wdt_setup(wdt, 0);
+	err = wdt_setup(wdt, WDT_OPT_PAUSE_HALTED_BY_DBG);
 	if (err < 0) {
 		TC_PRINT("Watchdog setup error\n");
 	}
@@ -195,17 +209,17 @@ static int test_wdt_no_callback(void)
 	m_state = WDT_TEST_STATE_CHECK_RESET;
 	while (1) {
 		k_yield();
-	};
+	}
 }
 
 #if TEST_WDT_CALLBACK_1
 static int test_wdt_callback_1(void)
 {
 	int err;
-	const struct device *wdt = device_get_binding(WDT_DEV_NAME);
+	const struct device *wdt = DEVICE_DT_GET(WDT_NODE);
 
-	if (!wdt) {
-		TC_PRINT("Cannot get WDT device\n");
+	if (!device_is_ready(wdt)) {
+		TC_PRINT("WDT device is not ready\n");
 		return TC_FAIL;
 	}
 
@@ -225,7 +239,7 @@ static int test_wdt_callback_1(void)
 	m_testvalue = 0U;
 	m_cfg_wdt0.flags = WDT_FLAG_RESET_SOC;
 	m_cfg_wdt0.callback = wdt_int_cb0;
-	m_cfg_wdt0.window.max = 2000U;
+	m_cfg_wdt0.window.max = WDT_TEST_MAX_WINDOW;
 	err = wdt_install_timeout(wdt, &m_cfg_wdt0);
 	if (err < 0) {
 		if (err == -ENOTSUP) {
@@ -238,7 +252,7 @@ static int test_wdt_callback_1(void)
 		return TC_FAIL;
 	}
 
-	err = wdt_setup(wdt, 0);
+	err = wdt_setup(wdt, WDT_OPT_PAUSE_HALTED_BY_DBG);
 	if (err < 0) {
 		TC_PRINT("Watchdog setup error\n");
 		return TC_FAIL;
@@ -249,7 +263,7 @@ static int test_wdt_callback_1(void)
 	m_state = WDT_TEST_STATE_CHECK_RESET;
 	while (1) {
 		k_yield();
-	};
+	}
 }
 #endif
 
@@ -257,10 +271,10 @@ static int test_wdt_callback_1(void)
 static int test_wdt_callback_2(void)
 {
 	int err;
-	const struct device *wdt = device_get_binding(WDT_DEV_NAME);
+	const struct device *wdt = DEVICE_DT_GET(WDT_NODE);
 
-	if (!wdt) {
-		TC_PRINT("Cannot get WDT device\n");
+	if (!device_is_ready(wdt)) {
+		TC_PRINT("WDT device is not ready\n");
 		return TC_FAIL;
 	}
 
@@ -281,7 +295,7 @@ static int test_wdt_callback_2(void)
 	m_testvalue = 0U;
 	m_cfg_wdt0.callback = wdt_int_cb0;
 	m_cfg_wdt0.flags = WDT_FLAG_RESET_SOC;
-	m_cfg_wdt0.window.max = 2000U;
+	m_cfg_wdt0.window.max = WDT_TEST_MAX_WINDOW;
 	err = wdt_install_timeout(wdt, &m_cfg_wdt0);
 
 	if (err < 0) {
@@ -291,14 +305,14 @@ static int test_wdt_callback_2(void)
 
 	m_cfg_wdt1.callback = wdt_int_cb1;
 	m_cfg_wdt1.flags = WDT_FLAG_RESET_SOC;
-	m_cfg_wdt1.window.max = 2000U;
+	m_cfg_wdt1.window.max = WDT_TEST_MAX_WINDOW;
 	err = wdt_install_timeout(wdt, &m_cfg_wdt1);
 	if (err < 0) {
 		TC_PRINT("Watchdog install error\n");
 		return TC_FAIL;
 	}
 
-	err = wdt_setup(wdt, 0);
+	err = wdt_setup(wdt, WDT_OPT_PAUSE_HALTED_BY_DBG);
 	if (err < 0) {
 		TC_PRINT("Watchdog setup error\n");
 		return TC_FAIL;
@@ -311,17 +325,17 @@ static int test_wdt_callback_2(void)
 	while (1) {
 		wdt_feed(wdt, 0);
 		k_sleep(K_MSEC(100));
-	};
+	}
 }
 #endif
 
 static int test_wdt_bad_window_max(void)
 {
 	int err;
-	const struct device *wdt = device_get_binding(WDT_DEV_NAME);
+	const struct device *wdt = DEVICE_DT_GET(WDT_NODE);
 
-	if (!wdt) {
-		TC_PRINT("Cannot get WDT device\n");
+	if (!device_is_ready(wdt)) {
+		TC_PRINT("WDT device is not ready\n");
 		return TC_FAIL;
 	}
 
@@ -338,7 +352,7 @@ static int test_wdt_bad_window_max(void)
 	return TC_FAIL;
 }
 
-void test_wdt(void)
+ZTEST(wdt_basic_test_suite, test_wdt)
 {
 	if ((m_testcase_index != 1U) && (m_testcase_index != 2U)) {
 		zassert_true(test_wdt_no_callback() == TC_PASS, NULL);

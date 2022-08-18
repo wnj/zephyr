@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(net_l2_ppp, CONFIG_NET_L2_PPP_LOG_LEVEL);
 
-#include <net/net_core.h>
-#include <net/net_pkt.h>
+#include <zephyr/net/net_core.h>
+#include <zephyr/net/net_pkt.h>
+#include <zephyr/net/net_if.h>
 
-#include <net/ppp.h>
-#include <random/rand32.h>
+#include <zephyr/net/ppp.h>
+#include <zephyr/random/rand32.h>
 
 #include "net_private.h"
 
@@ -89,12 +90,13 @@ static void fsm_send_configure_req(struct ppp_fsm *fsm, bool retransmit)
 
 	fsm->retransmits--;
 
-	(void)k_delayed_work_submit(&fsm->timer, FSM_TIMEOUT);
+	(void)k_work_reschedule(&fsm->timer, FSM_TIMEOUT);
 }
 
 static void ppp_fsm_timeout(struct k_work *work)
 {
-	struct ppp_fsm *fsm = CONTAINER_OF(work, struct ppp_fsm, timer);
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+	struct ppp_fsm *fsm = CONTAINER_OF(dwork, struct ppp_fsm, timer);
 
 	NET_DBG("[%s/%p] Current state %s (%d)", fsm->name, fsm,
 		ppp_state_str(fsm->state), fsm->state);
@@ -147,7 +149,7 @@ static void ppp_fsm_timeout(struct k_work *work)
 
 			fsm->retransmits--;
 
-			(void)k_delayed_work_submit(&fsm->timer, FSM_TIMEOUT);
+			(void)k_work_reschedule(&fsm->timer, FSM_TIMEOUT);
 		}
 
 		break;
@@ -159,25 +161,13 @@ static void ppp_fsm_timeout(struct k_work *work)
 	}
 }
 
-static void ppp_pkt_send(struct k_work *work)
-{
-	struct net_pkt *pkt = CONTAINER_OF(work, struct net_pkt, work);
-	int ret;
-
-	ret = net_send_data(pkt);
-	if (ret < 0) {
-		net_pkt_unref(pkt);
-	}
-}
-
-
 void ppp_fsm_init(struct ppp_fsm *fsm, uint16_t protocol)
 {
 	fsm->protocol = protocol;
 	fsm->state = PPP_INITIAL;
 	fsm->flags = 0U;
 
-	k_delayed_work_init(&fsm->timer, ppp_fsm_timeout);
+	k_work_init_delayable(&fsm->timer, ppp_fsm_timeout);
 }
 
 static void fsm_down(struct ppp_fsm *fsm)
@@ -196,12 +186,12 @@ static void fsm_down(struct ppp_fsm *fsm)
 static void terminate(struct ppp_fsm *fsm, enum ppp_state next_state)
 {
 	if (fsm->state != PPP_OPENED) {
-		k_delayed_work_cancel(&fsm->timer);
+		k_work_cancel_delayable(&fsm->timer);
 	} else {
 		fsm_down(fsm);
 	}
 
-	fsm->retransmits = MAX_CONFIGURE_REQ;
+	fsm->retransmits = MAX_TERMINATE_REQ;
 	fsm->req_id = ++fsm->id;
 
 	(void)ppp_send_pkt(fsm, NULL, PPP_TERMINATE_REQ, fsm->req_id,
@@ -218,7 +208,7 @@ static void terminate(struct ppp_fsm *fsm, enum ppp_state next_state)
 		return;
 	}
 
-	(void)k_delayed_work_submit(&fsm->timer, FSM_TIMEOUT);
+	(void)k_work_reschedule(&fsm->timer, FSM_TIMEOUT);
 
 	fsm->retransmits--;
 
@@ -276,7 +266,7 @@ void ppp_fsm_lower_down(struct ppp_fsm *fsm)
 	case PPP_REQUEST_SENT:
 	case PPP_STOPPING:
 		ppp_change_state(fsm, PPP_STARTING);
-		k_delayed_work_cancel(&fsm->timer);
+		k_work_cancel_delayable(&fsm->timer);
 		break;
 
 	case PPP_CLOSED:
@@ -285,7 +275,7 @@ void ppp_fsm_lower_down(struct ppp_fsm *fsm)
 
 	case PPP_CLOSING:
 		ppp_change_state(fsm, PPP_INITIAL);
-		k_delayed_work_cancel(&fsm->timer);
+		k_work_cancel_delayable(&fsm->timer);
 		break;
 
 	case PPP_OPENED:
@@ -406,10 +396,13 @@ int ppp_send_pkt(struct ppp_fsm *fsm, struct net_if *iface,
 	}
 
 	switch (type) {
-	case PPP_CODE_REJ:
+	case PPP_CODE_REJ: {
+		struct ppp_context *ctx = ppp_fsm_ctx(fsm);
+
 		len = net_pkt_get_len(req_pkt);
-		len = MIN(len, PPP_MRU);
+		len = MIN(len, ctx->lcp.my_options.mru);
 		break;
+	}
 
 	case PPP_CONFIGURE_ACK:
 	case PPP_CONFIGURE_NACK:
@@ -507,7 +500,7 @@ int ppp_send_pkt(struct ppp_fsm *fsm, struct net_if *iface,
 			goto out_of_mem;
 		}
 
-		data_len = MIN(data_len, PPP_MRU);
+		data_len = MIN(data_len, ctx->lcp.my_options.mru);
 		if (data_len > 0) {
 			if (data_len == sizeof(uint32_t)) {
 				ret = net_pkt_write_be32(pkt,
@@ -541,8 +534,7 @@ int ppp_send_pkt(struct ppp_fsm *fsm, struct net_if *iface,
 		 * have returned from this function. That is bad because the
 		 * fsm would be in wrong state and the received pkt is dropped.
 		 */
-		k_work_init(net_pkt_work(pkt), ppp_pkt_send);
-		k_work_submit(net_pkt_work(pkt));
+		ppp_queue_pkt(pkt);
 	} else {
 		ret = net_send_data(pkt);
 		if (ret < 0) {
@@ -651,7 +643,7 @@ static enum net_verdict fsm_recv_configure_req(struct ppp_fsm *fsm,
 
 	if (code == PPP_CONFIGURE_ACK) {
 		if (fsm->state == PPP_ACK_RECEIVED) {
-			k_delayed_work_cancel(&fsm->timer);
+			k_work_cancel_delayable(&fsm->timer);
 
 			ppp_change_state(fsm, PPP_OPENED);
 
@@ -706,13 +698,13 @@ static enum net_verdict fsm_recv_configure_ack(struct ppp_fsm *fsm, uint8_t id,
 
 	switch (fsm->state) {
 	case PPP_ACK_RECEIVED:
-		k_delayed_work_cancel(&fsm->timer);
+		k_work_cancel_delayable(&fsm->timer);
 		fsm_send_configure_req(fsm, false);
 		ppp_change_state(fsm, PPP_REQUEST_SENT);
 		break;
 
 	case PPP_ACK_SENT:
-		k_delayed_work_cancel(&fsm->timer);
+		k_work_cancel_delayable(&fsm->timer);
 		ppp_change_state(fsm, PPP_OPENED);
 		fsm->retransmits = MAX_CONFIGURE_REQ;
 		if (fsm->cb.up) {
@@ -816,14 +808,14 @@ static enum net_verdict fsm_recv_configure_nack_rej(struct ppp_fsm *fsm,
 
 	switch (fsm->state) {
 	case PPP_ACK_RECEIVED:
-		k_delayed_work_cancel(&fsm->timer);
+		k_work_cancel_delayable(&fsm->timer);
 		fsm_send_configure_req(fsm, false);
 		ppp_change_state(fsm, PPP_REQUEST_SENT);
 		break;
 
 	case PPP_ACK_SENT:
 	case PPP_REQUEST_SENT:
-		k_delayed_work_cancel(&fsm->timer);
+		k_work_cancel_delayable(&fsm->timer);
 		fsm_send_configure_req(fsm, false);
 		break;
 
@@ -870,7 +862,7 @@ static enum net_verdict fsm_recv_terminate_req(struct ppp_fsm *fsm, uint8_t id,
 
 			NET_DBG("[%s/%p] %s (%s)",
 				fsm->name, fsm, "Terminated by peer",
-				log_strdup(fsm->terminate_reason));
+				fsm->terminate_reason);
 		} else {
 			NET_DBG("[%s/%p] Terminated by peer",
 				fsm->name, fsm);
@@ -881,7 +873,7 @@ static enum net_verdict fsm_recv_terminate_req(struct ppp_fsm *fsm, uint8_t id,
 
 		fsm_down(fsm);
 
-		(void)k_delayed_work_submit(&fsm->timer, FSM_TIMEOUT);
+		(void)k_work_reschedule(&fsm->timer, FSM_TIMEOUT);
 		break;
 
 	default:
@@ -934,7 +926,7 @@ static enum net_verdict fsm_recv_terminate_ack(struct ppp_fsm *fsm, uint8_t id,
 	return NET_OK;
 
 stopped:
-	k_delayed_work_cancel(&fsm->timer);
+	k_work_cancel_delayable(&fsm->timer);
 	ppp_change_state(fsm, new_state);
 
 	if (fsm->cb.finished) {
@@ -983,7 +975,7 @@ void ppp_fsm_proto_reject(struct ppp_fsm *fsm)
 	case PPP_ACK_SENT:
 	case PPP_STOPPING:
 	case PPP_REQUEST_SENT:
-		k_delayed_work_cancel(&fsm->timer);
+		k_work_cancel_delayable(&fsm->timer);
 		ppp_change_state(fsm, PPP_STOPPED);
 		if (fsm->cb.finished) {
 			fsm->cb.finished(fsm);
@@ -1000,7 +992,7 @@ void ppp_fsm_proto_reject(struct ppp_fsm *fsm)
 		break;
 
 	case PPP_CLOSING:
-		k_delayed_work_cancel(&fsm->timer);
+		k_work_cancel_delayable(&fsm->timer);
 		ppp_change_state(fsm, PPP_CLOSED);
 		if (fsm->cb.finished) {
 			fsm->cb.finished(fsm);
@@ -1033,6 +1025,7 @@ enum net_verdict ppp_fsm_input(struct ppp_fsm *fsm, uint16_t proto,
 	uint8_t code, id;
 	uint16_t length;
 	int ret;
+	struct ppp_context *ctx = ppp_fsm_ctx(fsm);
 
 	ret = net_pkt_read_u8(pkt, &code);
 	if (ret < 0) {
@@ -1055,7 +1048,7 @@ enum net_verdict ppp_fsm_input(struct ppp_fsm *fsm, uint16_t proto,
 		return NET_DROP;
 	}
 
-	if (length > PPP_MRU) {
+	if (length > ctx->lcp.my_options.mru) {
 		NET_DBG("[%s/%p] Too long msg %d", fsm->name, fsm, length);
 		return NET_DROP;
 	}

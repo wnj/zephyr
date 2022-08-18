@@ -17,3 +17,11 @@ supported:
   - i2c
   - pwm
   - adc
+  - netif:eth
+  - spi
+  - backup_sram
+  - watchdog
+  - usb_device
+  - can
+  - canfd
+  - dac

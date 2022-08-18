@@ -4,8 +4,5 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-zephyr_library()
-zephyr_library_include_directories(${ZEPHYR_BASE}/drivers)
-zephyr_library_sources(pinmux.c)
-zephyr_sources_ifdef(CONFIG_BOOT_FLEXSPI_NOR mmswiftio_flexspi_nor_config.c)
+zephyr_sources_ifdef(CONFIG_BOOT_FLEXSPI_NOR flexspi_nor_config.c)
 zephyr_sources_ifdef(CONFIG_DEVICE_CONFIGURATION_DATA mmswiftio_sdram_ini_dcd.c)

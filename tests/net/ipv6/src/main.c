@@ -6,7 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_test, CONFIG_NET_IPV6_LOG_LEVEL);
 
 #include <zephyr/types.h>
@@ -14,25 +14,28 @@ LOG_MODULE_REGISTER(net_test, CONFIG_NET_IPV6_LOG_LEVEL);
 #include <stddef.h>
 #include <string.h>
 #include <errno.h>
-#include <linker/sections.h>
-#include <random/rand32.h>
+#include <zephyr/linker/sections.h>
+#include <zephyr/random/rand32.h>
 
-#include <ztest.h>
+#include <zephyr/ztest.h>
 
-#include <net/net_core.h>
-#include <net/net_pkt.h>
-#include <net/net_ip.h>
-#include <net/ethernet.h>
-#include <net/dummy.h>
-#include <net/udp.h>
+#include <zephyr/net/net_core.h>
+#include <zephyr/net/net_pkt.h>
+#include <zephyr/net/net_ip.h>
+#include <zephyr/net/ethernet.h>
+#include <zephyr/net/dummy.h>
+#include <zephyr/net/udp.h>
 
 #include "icmpv6.h"
 #include "ipv6.h"
+#include "route.h"
 
 #include "udp_internal.h"
 
 #define NET_LOG_ENABLED 1
 #include "net_private.h"
+
+#define TEST_NET_IF net_if_lookup_by_dev(DEVICE_GET(eth_ipv6_net))
 
 static struct in6_addr my_addr = { { { 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0,
 				       0, 0, 0, 0, 0, 0, 0, 0x1 } } };
@@ -82,13 +85,13 @@ static const unsigned char icmpv6_ns_no_sllao[] = {
 /* */
 static const unsigned char icmpv6_ra[] = {
 /* IPv6 header starts here */
-	0x60, 0x00, 0x00, 0x00, 0x00, 0x40, 0x3a, 0xff,
+	0x60, 0x00, 0x00, 0x00, 0x00, 0x58, 0x3a, 0xff,
 	0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x02, 0x60, 0x97, 0xff, 0xfe, 0x07, 0x69, 0xea,
 	0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 /* ICMPv6 RA header starts here */
-	0x86, 0x00, 0x8b, 0xaa, 0x40, 0x00, 0x07, 0x08,
+	0x86, 0x00, 0x05, 0xd7, 0x40, 0x00, 0x07, 0x08,
 	0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
 /* SLLAO */
 	0x01, 0x01, 0x00, 0x60, 0x97, 0x07, 0x69, 0xea,
@@ -98,6 +101,10 @@ static const unsigned char icmpv6_ra[] = {
 	0x03, 0x04, 0x40, 0xc0, 0xFF, 0xFF, 0xFF, 0xFF,
 	0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
 	0x3f, 0xfe, 0x05, 0x07, 0x00, 0x00, 0x00, 0x01,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* Route info */
+	0x18, 0x03, 0x30, 0x08, 0xff, 0xff, 0xff, 0xff,
+	0x20, 0x01, 0x0d, 0xb0, 0x0f, 0xff, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
@@ -238,7 +245,7 @@ static int tester_send(const struct device *dev, struct net_pkt *pkt)
 
 	icmp = get_icmp_hdr(pkt);
 
-	/* Reply with RA messge */
+	/* Reply with RA message */
 	if (icmp->type == NET_ICMPV6_RS) {
 		if (expecting_ra) {
 			prepare_ra_message(pkt);
@@ -285,11 +292,11 @@ static const struct ethernet_api net_test_if_api = {
 #define _ETH_L2_LAYER ETHERNET_L2
 #define _ETH_L2_CTX_TYPE NET_L2_GET_CTX_TYPE(ETHERNET_L2)
 
-NET_DEVICE_INIT(net_test_ipv6, "net_test_ipv6",
-		net_test_dev_init, device_pm_control_nop, &net_test_data, NULL,
+NET_DEVICE_INIT(eth_ipv6_net, "eth_ipv6_net",
+		net_test_dev_init, NULL, &net_test_data, NULL,
 		CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 		&net_test_if_api, _ETH_L2_LAYER, _ETH_L2_CTX_TYPE,
-		127);
+		NET_ETH_MTU);
 
 /* dummy interface for multi-interface tests */
 static int dummy_send(const struct device *dev, struct net_pkt *pkt)
@@ -310,8 +317,8 @@ static const struct dummy_api net_dummy_if_api = {
 #define _DUMMY_L2_LAYER DUMMY_L2
 #define _DUMMY_L2_CTX_TYPE NET_L2_GET_CTX_TYPE(DUMMY_L2)
 
-NET_DEVICE_INIT(net_dummy_ipv6, "net_dummy_ipv6",
-		net_test_dev_init, device_pm_control_nop, &net_dummy_data,
+NET_DEVICE_INIT(eth_ipv6_net_dummy, "eth_ipv6_net_dummy",
+		net_test_dev_init, NULL, &net_dummy_data,
 		NULL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 		&net_dummy_if_api, _DUMMY_L2_LAYER, _DUMMY_L2_CTX_TYPE,
 		127);
@@ -323,7 +330,7 @@ static void test_init(void)
 {
 	struct net_if_addr *ifaddr = NULL, *ifaddr2;
 	struct net_if_mcast_addr *maddr;
-	struct net_if *iface = net_if_get_default();
+	struct net_if *iface = TEST_NET_IF;
 	struct net_if *iface2 = NULL;
 	struct net_if_ipv6 *ipv6;
 	int i;
@@ -435,7 +442,7 @@ static void test_add_neighbor(void)
 	lladdr.addr = llstorage.addr;
 	lladdr.type = NET_LINK_ETHERNET;
 
-	nbr = net_ipv6_nbr_add(net_if_get_default(), &peer_addr, &lladdr,
+	nbr = net_ipv6_nbr_add(TEST_NET_IF, &peer_addr, &lladdr,
 			       false, NET_IPV6_NBR_STATE_REACHABLE);
 	zassert_not_null(nbr, "Cannot add peer %s to neighbor cache\n",
 			 net_sprint_ipv6_addr(&peer_addr));
@@ -467,7 +474,7 @@ static void test_add_max_neighbors(void)
 	for (i = 0U; i < CONFIG_NET_IPV6_MAX_NEIGHBORS + 1; i++) {
 		llstorage.addr[5] += i;
 		dst_addr.s6_addr[15] += i;
-		nbr = net_ipv6_nbr_add(net_if_get_default(), &dst_addr,
+		nbr = net_ipv6_nbr_add(TEST_NET_IF, &dst_addr,
 				       &lladdr, false,
 				       NET_IPV6_NBR_STATE_STALE);
 		zassert_not_null(nbr, "Cannot add peer %s to neighbor cache\n",
@@ -482,8 +489,7 @@ static void test_nbr_lookup_fail(void)
 {
 	struct net_nbr *nbr;
 
-	nbr = net_ipv6_nbr_lookup(net_if_get_default(),
-				  &peer_addr);
+	nbr = net_ipv6_nbr_lookup(TEST_NET_IF, &peer_addr);
 	zassert_is_null(nbr, "Neighbor %s found in cache\n",
 			net_sprint_ipv6_addr(&peer_addr));
 
@@ -496,8 +502,7 @@ static void test_nbr_lookup_ok(void)
 {
 	struct net_nbr *nbr;
 
-	nbr = net_ipv6_nbr_lookup(net_if_get_default(),
-				  &peer_addr);
+	nbr = net_ipv6_nbr_lookup(TEST_NET_IF, &peer_addr);
 	zassert_not_null(nbr, "Neighbor %s not found in cache\n",
 			 net_sprint_ipv6_addr(&peer_addr));
 }
@@ -510,7 +515,7 @@ static void test_send_ns_extra_options(void)
 	struct net_pkt *pkt;
 	struct net_if *iface;
 
-	iface = net_if_get_default();
+	iface = TEST_NET_IF;
 
 	pkt = net_pkt_alloc_with_buffer(iface, sizeof(icmpv6_ns_invalid),
 					AF_UNSPEC, 0, K_FOREVER);
@@ -533,7 +538,7 @@ static void test_send_ns_no_options(void)
 	struct net_pkt *pkt;
 	struct net_if *iface;
 
-	iface = net_if_get_default();
+	iface = TEST_NET_IF;
 
 	pkt = net_pkt_alloc_with_buffer(iface, sizeof(icmpv6_ns_no_sllao),
 					AF_UNSPEC, 0, K_FOREVER);
@@ -558,8 +563,7 @@ static void test_prefix_timeout(void)
 	uint32_t lifetime = 1U;
 	int len = 64;
 
-	prefix = net_if_ipv6_prefix_add(net_if_get_default(),
-					&addr, len, lifetime);
+	prefix = net_if_ipv6_prefix_add(TEST_NET_IF, &addr, len, lifetime);
 	zassert_not_null(prefix, "Cannot get prefix");
 
 	net_if_ipv6_prefix_set_lf(prefix, false);
@@ -567,8 +571,7 @@ static void test_prefix_timeout(void)
 
 	k_sleep(K_SECONDS(lifetime * 2U));
 
-	prefix = net_if_ipv6_prefix_lookup(net_if_get_default(),
-					   &addr, len);
+	prefix = net_if_ipv6_prefix_lookup(TEST_NET_IF, &addr, len);
 	zassert_is_null(prefix, "Prefix %s/%d should have expired",
 			net_sprint_ipv6_addr(&addr), len);
 }
@@ -583,13 +586,12 @@ static void test_prefix_timeout_long(void)
 	uint64_t remaining;
 	int ret;
 
-	ifprefix = net_if_ipv6_prefix_add(net_if_get_default(),
-					  &prefix, len, lifetime);
+	ifprefix = net_if_ipv6_prefix_add(TEST_NET_IF, &prefix, len, lifetime);
 
 	net_if_ipv6_prefix_set_lf(ifprefix, false);
 	net_if_ipv6_prefix_set_timer(ifprefix, lifetime);
 
-	zassert_equal(ifprefix->lifetime.wrap_counter, 2000,
+	zassert_equal(ifprefix->lifetime.wrap_counter, 1999,
 		      "Wrap counter wrong (%d)",
 		      ifprefix->lifetime.wrap_counter);
 	remaining = MSEC_PER_SEC * (uint64_t)lifetime -
@@ -599,7 +601,7 @@ static void test_prefix_timeout_long(void)
 		     "Remaining time wrong (%llu vs %d)", remaining,
 		      ifprefix->lifetime.timer_timeout);
 
-	ret = net_if_ipv6_prefix_rm(net_if_get_default(), &prefix, len);
+	ret = net_if_ipv6_prefix_rm(TEST_NET_IF, &prefix, len);
 	zassert_equal(ret, true, "Prefix %s/%d should have been removed",
 		      net_sprint_ipv6_addr(&prefix), len);
 }
@@ -609,7 +611,7 @@ static void test_rs_message(void)
 	struct net_if *iface;
 	int ret;
 
-	iface = net_if_get_default();
+	iface = TEST_NET_IF;
 
 	expecting_ra = true;
 
@@ -624,6 +626,8 @@ static void test_ra_message(void)
 				     0x97, 0xff, 0xfe, 0x07, 0x69, 0xea } } };
 	struct in6_addr prefix = { { { 0x3f, 0xfe, 0x05, 0x07, 0, 0, 0, 1,
 				       0, 0, 0, 0, 0, 0, 0, 0 } } };
+	struct in6_addr route_prefix = { { { 0x20, 0x01, 0x0d, 0xb0, 0x0f, 0xff } } };
+	struct net_route_entry *route;
 
 	/* We received RA message earlier, make sure that the information
 	 * in that message is placed to proper prefix and lookup info.
@@ -631,14 +635,23 @@ static void test_ra_message(void)
 
 	expecting_ra = false;
 
-	zassert_false(!net_if_ipv6_prefix_lookup(net_if_get_default(),
-						 &prefix, 32),
+	zassert_false(!net_if_ipv6_prefix_lookup(TEST_NET_IF, &prefix, 32),
 		      "Prefix %s should be here\n",
 		      net_sprint_ipv6_addr(&prefix));
 
-	zassert_false(!net_if_ipv6_router_lookup(net_if_get_default(), &addr),
+	zassert_false(!net_if_ipv6_router_lookup(TEST_NET_IF, &addr),
 		      "Router %s should be here\n",
 		      net_sprint_ipv6_addr(&addr));
+
+	/* Check if route was added correctly. */
+	route = net_route_lookup(TEST_NET_IF, &route_prefix);
+	zassert_not_null(route, "Route not found");
+	zassert_equal(route->prefix_len, 48, "Wrong prefix length set");
+	zassert_mem_equal(&route->addr, &route_prefix, sizeof(route_prefix),
+			  "Wrong prefix set");
+	zassert_true(route->is_infinite, "Wrong lifetime set");
+	zassert_equal(route->preference, NET_ROUTE_PREFERENCE_HIGH,
+		      "Wrong preference set");
 }
 
 /**
@@ -649,7 +662,7 @@ static void test_hbho_message(void)
 	struct net_pkt *pkt;
 	struct net_if *iface;
 
-	iface = net_if_get_default();
+	iface = TEST_NET_IF;
 
 	pkt = net_pkt_alloc_with_buffer(iface, sizeof(ipv6_hbho),
 					AF_UNSPEC, 0, K_FOREVER);
@@ -700,7 +713,7 @@ static void test_hbho_message_1(void)
 	struct net_pkt *pkt;
 	struct net_if *iface;
 
-	iface = net_if_get_default();
+	iface = TEST_NET_IF;
 
 	pkt = net_pkt_alloc_with_buffer(iface, sizeof(ipv6_hbho_1),
 					AF_UNSPEC, 0, K_FOREVER);
@@ -760,7 +773,7 @@ static void test_hbho_message_2(void)
 	struct net_pkt *pkt;
 	struct net_if *iface;
 
-	iface = net_if_get_default();
+	iface = TEST_NET_IF;
 
 	pkt = net_pkt_alloc_with_buffer(iface, sizeof(ipv6_hbho_2),
 					AF_UNSPEC, 0, K_FOREVER);
@@ -923,7 +936,7 @@ static void test_hbho_message_3(void)
 	struct net_pkt *pkt;
 	struct net_if *iface;
 
-	iface = net_if_get_default();
+	iface = TEST_NET_IF;
 
 	pkt = net_pkt_alloc_with_buffer(iface, sizeof(ipv6_hbho_3),
 					AF_UNSPEC, 0, K_FOREVER);
@@ -950,7 +963,7 @@ static void test_address_lifetime(void)
 {
 	struct in6_addr addr = { { { 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0,
 				     0, 0, 0, 0, 0, 0, 0x20, 0x1 } } };
-	struct net_if *iface = net_if_get_default();
+	struct net_if *iface = TEST_NET_IF;
 	uint32_t vlifetime = 0xffff;
 	uint64_t timeout = (uint64_t)vlifetime * MSEC_PER_SEC;
 	struct net_if_addr *ifaddr;
@@ -1026,7 +1039,7 @@ static void test_change_ll_addr(void)
 
 	net_ipv6_addr_create(&dst, 0xff02, 0, 0, 0, 0, 0, 0, 1);
 
-	iface = net_if_get_default();
+	iface = TEST_NET_IF;
 
 	flags = NET_ICMPV6_NA_FLAG_ROUTER |
 		NET_ICMPV6_NA_FLAG_OVERRIDE;
@@ -1072,7 +1085,7 @@ static void test_dad_timeout(void)
 				      0, 0, 0, 0, 0, 0, 0x99, 0x2 } } };
 	struct in6_addr addr3 = { { { 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0,
 				      0, 0, 0, 0, 0, 0, 0x99, 0x3 } } };
-	struct net_if *iface = net_if_get_default();
+	struct net_if *iface = TEST_NET_IF;
 
 	struct net_if_addr *ifaddr;
 
@@ -1093,14 +1106,9 @@ static void test_dad_timeout(void)
 
 	k_sleep(K_MSEC(200));
 
-	/* We should have received three DAD queries, make sure they are in
-	 * proper order.
-	 */
-	zassert_true(dad_time[0] < dad_time[1], "DAD timer 1+2 failure");
-	zassert_true(dad_time[1] < dad_time[2], "DAD timer 2+3 failure");
-	zassert_true((dad_time[2] - dad_time[0]) < 100,
-		     "DAD timers took too long time [%u] [%u] [%u]",
-		     dad_time[0], dad_time[1], dad_time[2]);
+	/* Check we have received three DAD queries */
+	zassert_true((dad_time[0] != 0U) && (dad_time[1] != 0U) &&
+			(dad_time[2] != 0U), "Did not get DAD reply");
 #endif
 }
 
@@ -1148,7 +1156,7 @@ static enum net_verdict recv_msg(struct in6_addr *src, struct in6_addr *dst)
 	struct net_pkt *pkt;
 	struct net_if *iface;
 
-	iface = net_if_get_default();
+	iface = TEST_NET_IF;
 
 	pkt = setup_ipv6_udp(iface, src, dst, 4242, 4321);
 
@@ -1163,7 +1171,7 @@ static int send_msg(struct in6_addr *src, struct in6_addr *dst)
 	struct net_pkt *pkt;
 	struct net_if *iface;
 
-	iface = net_if_get_default();
+	iface = TEST_NET_IF;
 
 	pkt = setup_ipv6_udp(iface, src, dst, 4242, 4321);
 
@@ -1297,7 +1305,7 @@ static void join_group(struct in6_addr *mcast_addr)
 {
 	int ret;
 
-	ret = net_ipv6_mld_join(net_if_get_default(), mcast_addr);
+	ret = net_ipv6_mld_join(TEST_NET_IF, mcast_addr);
 	zassert_equal(ret, 0, "Cannot join IPv6 multicast group");
 }
 
@@ -1356,7 +1364,7 @@ static void test_dst_iface_scope_mcast_send(void)
 	 * device. But we will still need to add proper multicast address to
 	 * the network interface.
 	 */
-	maddr = net_if_ipv6_maddr_add(net_if_get_default(), &mcast_iface);
+	maddr = net_if_ipv6_maddr_add(TEST_NET_IF, &mcast_iface);
 	zassert_not_null(maddr, "Cannot add multicast address to interface");
 
 	net_ctx_create(&ctx);
@@ -1428,8 +1436,7 @@ static void test_dst_unjoined_group_mcast_recv(void)
 	net_ctx_recv(ctx);
 
 	/* add multicast address to interface but do not join the group yet */
-	maddr = net_if_ipv6_maddr_add(net_if_get_default(),
-				      &mcast_unjoined_group);
+	maddr = net_if_ipv6_maddr_add(TEST_NET_IF, &mcast_unjoined_group);
 
 	/* receive multicast on interface that did not join the group yet.
 	 * Expectation: packet should be dropped by first interface on IP

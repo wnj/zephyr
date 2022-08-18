@@ -7,7 +7,7 @@
 #define ZEPHYR_ARCH_X86_INCLUDE_KERNEL_ARCH_FUNC_H_
 
 #include <kernel_arch_data.h>
-#include <arch/x86/mmustructs.h>
+#include <zephyr/arch/x86/mmustructs.h>
 
 #ifdef CONFIG_X86_64
 #include <intel64/kernel_arch_func.h>
@@ -91,6 +91,22 @@ void *z_x86_userspace_prepare_thread(struct k_thread *thread);
 #endif /* CONFIG_USERSPACE */
 
 void z_x86_do_kernel_oops(const z_arch_esf_t *esf);
+
+/*
+ * Find a free IRQ vector at the specified priority, or return -1 if none left.
+ * For multiple vector allocated one after another, prev_vector can be used to
+ * speed up the allocation: it only needs to be filled with the previous
+ * allocated vector, or -1 to start over.
+ */
+int z_x86_allocate_vector(unsigned int priority, int prev_vector);
+
+/*
+ * Connect a vector
+ */
+void z_x86_irq_connect_on_vector(unsigned int irq,
+				 uint8_t vector,
+				 void (*func)(const void *arg),
+				 const void *arg);
 
 #endif /* !_ASMLANGUAGE */
 

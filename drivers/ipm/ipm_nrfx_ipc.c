@@ -7,12 +7,12 @@
 #define DT_DRV_COMPAT nordic_nrf_ipc
 
 #include <string.h>
-#include <drivers/ipm.h>
+#include <zephyr/drivers/ipm.h>
 #include <nrfx_ipc.h>
 #include "ipm_nrfx_ipc.h"
 
 #define LOG_LEVEL CONFIG_IPM_LOG_LEVEL
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(ipm_nrfx_ipc);
 
 struct ipm_nrf_data {
@@ -27,8 +27,6 @@ static void gipm_send(uint32_t id);
 
 #if IS_ENABLED(CONFIG_IPM_NRF_SINGLE_INSTANCE)
 
-DEVICE_DECLARE(ipm_nrf);
-
 static void nrfx_ipc_handler(uint32_t event_mask, void *p_context)
 {
 	if (nrfx_ipm_data.callback) {
@@ -38,7 +36,7 @@ static void nrfx_ipc_handler(uint32_t event_mask, void *p_context)
 			__ASSERT(event_idx < NRFX_IPC_ID_MAX_VALUE,
 				 "Illegal event_idx: %d", event_idx);
 			event_mask &= ~BIT(event_idx);
-			nrfx_ipm_data.callback(DEVICE_GET(ipm_nrf),
+			nrfx_ipm_data.callback(DEVICE_DT_INST_GET(0),
 					       nrfx_ipm_data.user_data,
 					       event_idx,
 					       NULL);
@@ -110,8 +108,7 @@ static const struct ipm_driver_api ipm_nrf_driver_api = {
 	.set_enabled = ipm_nrf_set_enabled
 };
 
-DEVICE_AND_API_INIT(ipm_nrf, DT_INST_LABEL(0),
-		    ipm_nrf_init, NULL, NULL,
+DEVICE_DT_INST_DEFINE(0, ipm_nrf_init, NULL, NULL, NULL,
 		    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 		    &ipm_nrf_driver_api);
 
@@ -228,15 +225,15 @@ static const struct ipm_driver_api vipm_nrf_##_idx##_driver_api = {	\
 	.set_enabled = vipm_nrf_##_idx##_set_enabled			\
 };									\
 									\
-DEVICE_AND_API_INIT(vipm_nrf_##_idx, "IPM_"#_idx,			\
-		    vipm_nrf_init, NULL, NULL,				\
+DEVICE_DEFINE(vipm_nrf_##_idx, "IPM_"#_idx,				\
+		    vipm_nrf_init, NULL, NULL, NULL,			\
 		    PRE_KERNEL_2, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,	\
 		    &vipm_nrf_##_idx##_driver_api)
 
 #define VIPM_DEVICE(_idx, _)						\
-	IF_ENABLED(CONFIG_IPM_MSG_CH_##_idx##_ENABLE, (VIPM_DEVICE_1(_idx);))
+	IF_ENABLED(CONFIG_IPM_MSG_CH_##_idx##_ENABLE, (VIPM_DEVICE_1(_idx)))
 
-UTIL_LISTIFY(NRFX_IPC_ID_MAX_VALUE, VIPM_DEVICE, _);
+LISTIFY(NRFX_IPC_ID_MAX_VALUE, VIPM_DEVICE, (;), _);
 
 #endif
 

@@ -5,15 +5,15 @@
  */
 
 #include <errno.h>
-#include <kernel.h>
+#include <zephyr/kernel.h>
 #include <limits.h>
-#include <posix/unistd.h>
-#include <posix/dirent.h>
+#include <zephyr/posix/unistd.h>
+#include <zephyr/posix/dirent.h>
 #include <string.h>
-#include <sys/fdtable.h>
+#include <zephyr/sys/fdtable.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <fs/fs.h>
+#include <zephyr/fs/fs.h>
 
 BUILD_ASSERT(PATH_MAX >= MAX_FILE_NAME, "PATH_MAX is less than MAX_FILE_NAME");
 
@@ -107,7 +107,7 @@ int open(const char *name, int flags, ...)
 		return -1;
 	}
 
-	(void)memset(&ptr->file, 0, sizeof(ptr->file));
+	fs_file_t_init(&ptr->file);
 
 	rc = fs_open(&ptr->file, name, zmode);
 
@@ -230,7 +230,7 @@ DIR *opendir(const char *dirname)
 		return NULL;
 	}
 
-	(void)memset(&ptr->dir, 0, sizeof(ptr->dir));
+	fs_dir_t_init(&ptr->dir);
 
 	rc = fs_opendir(&ptr->dir, dirname);
 	if (rc < 0) {
@@ -287,6 +287,11 @@ struct dirent *readdir(DIR *dirp)
 	rc = fs_readdir(&ptr->dir, &fdirent);
 	if (rc < 0) {
 		errno = -rc;
+		return NULL;
+	}
+
+	if (fdirent.name[0] == 0) {
+		/* assume end-of-dir, leave errno untouched */
 		return NULL;
 	}
 

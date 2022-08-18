@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <drivers/entropy.h>
-#include <sys/atomic.h>
+#include <zephyr/drivers/entropy.h>
+#include <zephyr/sys/atomic.h>
 #include <soc.h>
 #include <hal/nrf_rng.h>
 
@@ -96,9 +96,6 @@ struct entropy_nrf5_dev_data {
 };
 
 static struct entropy_nrf5_dev_data entropy_nrf5_data;
-
-#define DEV_DATA(dev) \
-	((struct entropy_nrf5_dev_data *)(dev)->data)
 
 static int random_byte_get(void)
 {
@@ -227,11 +224,11 @@ static void isr(const void *arg)
 	}
 }
 
-static int entropy_nrf5_get_entropy(const struct device *device, uint8_t *buf,
+static int entropy_nrf5_get_entropy(const struct device *dev, uint8_t *buf,
 				    uint16_t len)
 {
 	/* Check if this API is called on correct driver instance. */
-	__ASSERT_NO_MSG(&entropy_nrf5_data == DEV_DATA(device));
+	__ASSERT_NO_MSG(&entropy_nrf5_data == dev->data);
 
 	while (len) {
 		uint16_t bytes;
@@ -261,7 +258,7 @@ static int entropy_nrf5_get_entropy_isr(const struct device *dev,
 	uint16_t cnt = len;
 
 	/* Check if this API is called on correct driver instance. */
-	__ASSERT_NO_MSG(&entropy_nrf5_data == DEV_DATA(dev));
+	__ASSERT_NO_MSG(&entropy_nrf5_data == dev->data);
 
 	if (likely((flags & ENTROPY_BUSYWAIT) == 0U)) {
 		return rng_pool_get((struct rng_pool *)(entropy_nrf5_data.isr),
@@ -324,22 +321,23 @@ static int entropy_nrf5_get_entropy_isr(const struct device *dev,
 	return cnt;
 }
 
-static int entropy_nrf5_init(const struct device *device);
+static int entropy_nrf5_init(const struct device *dev);
 
 static const struct entropy_driver_api entropy_nrf5_api_funcs = {
 	.get_entropy = entropy_nrf5_get_entropy,
 	.get_entropy_isr = entropy_nrf5_get_entropy_isr
 };
 
-DEVICE_AND_API_INIT(entropy_nrf5, DT_INST_LABEL(0),
-		    entropy_nrf5_init, &entropy_nrf5_data, NULL,
-		    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+DEVICE_DT_INST_DEFINE(0,
+		    entropy_nrf5_init, NULL,
+		    &entropy_nrf5_data, NULL,
+		    PRE_KERNEL_1, CONFIG_ENTROPY_INIT_PRIORITY,
 		    &entropy_nrf5_api_funcs);
 
-static int entropy_nrf5_init(const struct device *device)
+static int entropy_nrf5_init(const struct device *dev)
 {
 	/* Check if this API is called on correct driver instance. */
-	__ASSERT_NO_MSG(&entropy_nrf5_data == DEV_DATA(device));
+	__ASSERT_NO_MSG(&entropy_nrf5_data == dev->data);
 
 	/* Locking semaphore initialized to 1 (unlocked) */
 	k_sem_init(&entropy_nrf5_data.sem_lock, 1, 1);

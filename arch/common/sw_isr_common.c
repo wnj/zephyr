@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <sw_isr_table.h>
-#include <arch/cpu.h>
-#include <sys/__assert.h>
+#include <zephyr/sw_isr_table.h>
+#include <zephyr/arch/cpu.h>
+#include <zephyr/sys/__assert.h>
 /*
  * Common code for arches that use software ISR tables (CONFIG_GEN_ISR_TABLES)
  */
@@ -23,7 +23,7 @@ struct irq_parent_offset {
 #define INIT_IRQ_PARENT_OFFSET(i, o) { \
 	.irq = i, \
 	.offset = o, \
-},
+}
 
 #define IRQ_INDEX_TO_OFFSET(i, base) (base + i * CONFIG_MAX_IRQ_PER_AGGREGATOR)
 
@@ -33,7 +33,7 @@ struct irq_parent_offset {
 	INIT_IRQ_PARENT_OFFSET(CONFIG_2ND_LVL_INTR_0##i##_OFFSET, \
 		IRQ_INDEX_TO_OFFSET(i, base))
 static struct irq_parent_offset lvl2_irq_list[CONFIG_NUM_2ND_LEVEL_AGGREGATORS]
-	= { UTIL_LISTIFY(CONFIG_NUM_2ND_LEVEL_AGGREGATORS, CAT_2ND_LVL_LIST,
+	= { LISTIFY(CONFIG_NUM_2ND_LEVEL_AGGREGATORS, CAT_2ND_LVL_LIST, (,),
 		CONFIG_2ND_LVL_ISR_TBL_OFFSET) };
 
 #endif/* CONFIG_2ND_LEVEL_INTERRUPTS */
@@ -44,7 +44,7 @@ static struct irq_parent_offset lvl2_irq_list[CONFIG_NUM_2ND_LEVEL_AGGREGATORS]
 	INIT_IRQ_PARENT_OFFSET(CONFIG_3RD_LVL_INTR_0##i##_OFFSET, \
 		IRQ_INDEX_TO_OFFSET(i, base))
 static struct irq_parent_offset lvl3_irq_list[CONFIG_NUM_3RD_LEVEL_AGGREGATORS]
-	 = { UTIL_LISTIFY(CONFIG_NUM_3RD_LEVEL_AGGREGATORS, CAT_3RD_LVL_LIST,
+	 = { LISTIFY(CONFIG_NUM_3RD_LEVEL_AGGREGATORS, CAT_3RD_LVL_LIST, (,),
 		CONFIG_3RD_LVL_ISR_TBL_OFFSET) };
 
 #endif /* CONFIG_3RD_LEVEL_INTERRUPTS */
@@ -54,9 +54,9 @@ unsigned int get_parent_offset(unsigned int parent_irq,
 					unsigned int length)
 {
 	unsigned int i;
-	unsigned int offset = 0;
+	unsigned int offset = 0U;
 
-	for (i = 0; i < length; ++i) {
+	for (i = 0U; i < length; ++i) {
 		if (list[i].irq == parent_irq) {
 			offset = list[i].offset;
 			break;
@@ -91,7 +91,7 @@ void z_isr_install(unsigned int irq, void (*routine)(const void *),
 
 	level = irq_get_level(irq);
 
-	if (level == 2) {
+	if (level == 2U) {
 		parent_irq = irq_parent_level_2(irq);
 		parent_offset = get_parent_offset(parent_irq,
 			lvl2_irq_list,
@@ -99,7 +99,7 @@ void z_isr_install(unsigned int irq, void (*routine)(const void *),
 		table_idx = parent_offset + irq_from_level_2(irq);
 	}
 #ifdef CONFIG_3RD_LEVEL_INTERRUPTS
-	else if (level == 3) {
+	else if (level == 3U) {
 		parent_irq = irq_parent_level_3(irq);
 		parent_offset = get_parent_offset(parent_irq,
 			lvl3_irq_list,

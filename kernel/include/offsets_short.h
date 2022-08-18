@@ -24,6 +24,11 @@
 
 #define _kernel_offset_to_current \
 	(___cpu_t_current_OFFSET)
+
+#if defined(CONFIG_FPU_SHARING)
+#define _kernel_offset_to_fp_ctx \
+	(___cpu_t_fp_ctx_OFFSET)
+#endif /* CONFIG_FPU_SHARING */
 #endif /* CONFIG_SMP */
 
 #define _kernel_offset_to_idle \
@@ -43,6 +48,11 @@
 
 #define _thread_offset_to_callee_saved \
 	(___thread_t_callee_saved_OFFSET)
+
+#ifdef CONFIG_THREAD_LOCAL_STORAGE
+#define _thread_offset_to_tls \
+	(___thread_t_tls_OFFSET)
+#endif /* CONFIG_THREAD_LOCAL_STORAGE */
 
 /* base */
 

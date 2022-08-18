@@ -8,17 +8,25 @@ on:
   push:
     paths:
     - 'scripts/dts/**'
+    - '.github/workflows/devicetree_checks.yml'
   pull_request:
     paths:
     - 'scripts/dts/**'
+    - '.github/workflows/devicetree_checks.yml'
 
 jobs:
-  build:
+  devicetree-checks:
+    name: Devicetree script tests
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         python-version: [3.6, 3.7, 3.8]
         os: [ubuntu-latest, macos-latest, windows-latest]
+        exclude:
+          - os: macos-latest
+            python-version: 3.6
+          - os: windows-latest
+            python-version: 3.6
     steps:
     - name: checkout
       uses: actions/checkout@v2
@@ -54,8 +62,8 @@ jobs:
     - name: install python dependencies
       run: |
         pip3 install wheel
-        pip3 install pytest pyyaml
-    - name: run pytest
-      working-directory: scripts/dts
+        pip3 install pytest pyyaml tox
+    - name: run tox
+      working-directory: scripts/dts/python-devicetree
       run: |
-        python -m pytest testdtlib.py testedtlib.py
+        tox

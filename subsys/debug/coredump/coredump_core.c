@@ -6,32 +6,39 @@
 
 #include <errno.h>
 #include <kernel_internal.h>
-#include <toolchain.h>
-#include <debug/coredump.h>
-#include <sys/byteorder.h>
-#include <sys/util.h>
+#include <zephyr/toolchain.h>
+#include <zephyr/debug/coredump.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/util.h>
 
 #include "coredump_internal.h"
 
 #if defined(CONFIG_DEBUG_COREDUMP_BACKEND_LOGGING)
-extern struct z_coredump_backend_api z_coredump_backend_logging;
-static struct z_coredump_backend_api
-	*backend_api = &z_coredump_backend_logging;
-#elif defined(DEBUG_COREDUMP_BACKEND_NULL)
-extern struct z_coredump_backend_api z_coredump_backend_null;
-static struct z_coredump_backend_api
-	*backend_api = &z_coredump_backend_null;
+extern struct coredump_backend_api coredump_backend_logging;
+static struct coredump_backend_api
+	*backend_api = &coredump_backend_logging;
+#elif defined(CONFIG_DEBUG_COREDUMP_BACKEND_FLASH_PARTITION)
+extern struct coredump_backend_api coredump_backend_flash_partition;
+static struct coredump_backend_api
+	*backend_api = &coredump_backend_flash_partition;
+#elif defined(CONFIG_DEBUG_COREDUMP_BACKEND_OTHER)
+extern struct coredump_backend_api coredump_backend_other;
+static struct coredump_backend_api
+	*backend_api = &coredump_backend_other;
 #else
 #error "Need to select a coredump backend"
 #endif
 
-static int error;
+#if defined(CONFIG_COREDUMP_DEVICE)
+#include <zephyr/drivers/coredump.h>
+#define DT_DRV_COMPAT zephyr_coredump
+#endif
 
-static int dump_header(unsigned int reason)
+static void dump_header(unsigned int reason)
 {
-	struct z_coredump_hdr_t hdr = {
+	struct coredump_hdr_t hdr = {
 		.id = {'Z', 'E'},
-		.hdr_version = Z_COREDUMP_HDR_VER,
+		.hdr_version = COREDUMP_HDR_VER,
 		.reason = sys_cpu_to_le16(reason),
 	};
 
@@ -45,7 +52,7 @@ static int dump_header(unsigned int reason)
 
 	hdr.tgt_code = sys_cpu_to_le16(arch_coredump_tgt_code_get());
 
-	return backend_api->buffer_output((uint8_t *)&hdr, sizeof(hdr));
+	backend_api->buffer_output((uint8_t *)&hdr, sizeof(hdr));
 }
 
 static void dump_thread(struct k_thread *thread)
@@ -65,13 +72,22 @@ static void dump_thread(struct k_thread *thread)
 
 	end_addr = POINTER_TO_UINT(thread) + sizeof(*thread);
 
-	z_coredump_memory_dump(POINTER_TO_UINT(thread), end_addr);
+	coredump_memory_dump(POINTER_TO_UINT(thread), end_addr);
 
 	end_addr = thread->stack_info.start + thread->stack_info.size;
 
-	z_coredump_memory_dump(thread->stack_info.start, end_addr);
+	coredump_memory_dump(thread->stack_info.start, end_addr);
 #endif
 }
+
+#if defined(CONFIG_COREDUMP_DEVICE)
+static void process_coredump_dev_memory(const struct device *dev)
+{
+	struct coredump_driver_api *api = (struct coredump_driver_api *)dev->api;
+
+	api->dump(dev);
+}
+#endif
 
 void process_memory_region_list(void)
 {
@@ -86,18 +102,21 @@ void process_memory_region_list(void)
 			break;
 		}
 
-		z_coredump_memory_dump(r->start, r->end);
+		coredump_memory_dump(r->start, r->end);
 
 		idx++;
 	}
 #endif
+
+#if defined(CONFIG_COREDUMP_DEVICE)
+#define MY_FN(inst) process_coredump_dev_memory(DEVICE_DT_INST_GET(inst));
+	DT_INST_FOREACH_STATUS_OKAY(MY_FN)
+#endif
 }
 
-void z_coredump(unsigned int reason, const z_arch_esf_t *esf,
-		struct k_thread *thread)
+void coredump(unsigned int reason, const z_arch_esf_t *esf,
+	      struct k_thread *thread)
 {
-	error = 0;
-
 	z_coredump_start();
 
 	dump_header(reason);
@@ -112,10 +131,6 @@ void z_coredump(unsigned int reason, const z_arch_esf_t *esf,
 
 	process_memory_region_list();
 
-	if (error != 0)	{
-		z_coredump_error();
-	}
-
 	z_coredump_end();
 }
 
@@ -129,33 +144,19 @@ void z_coredump_end(void)
 	backend_api->end();
 }
 
-void z_coredump_error(void)
+void coredump_buffer_output(uint8_t *buf, size_t buflen)
 {
-	backend_api->error();
-}
-
-int z_coredump_buffer_output(uint8_t *buf, size_t buflen)
-{
-	int ret;
-
-	/* Error encountered before, skip */
-	if (error != 0) {
-		return -EAGAIN;
-	}
-
 	if ((buf == NULL) || (buflen == 0)) {
-		ret = -EINVAL;
-	} else {
-		error = backend_api->buffer_output(buf, buflen);
-		ret = error;
+		/* Invalid buffer, skip */
+		return;
 	}
 
-	return ret;
+	backend_api->buffer_output(buf, buflen);
 }
 
-void z_coredump_memory_dump(uintptr_t start_addr, uintptr_t end_addr)
+void coredump_memory_dump(uintptr_t start_addr, uintptr_t end_addr)
 {
-	struct z_coredump_mem_hdr_t m;
+	struct coredump_mem_hdr_t m;
 	size_t len;
 
 	if ((start_addr == POINTER_TO_UINT(NULL)) ||
@@ -169,8 +170,8 @@ void z_coredump_memory_dump(uintptr_t start_addr, uintptr_t end_addr)
 
 	len = end_addr - start_addr;
 
-	m.id = Z_COREDUMP_MEM_HDR_ID;
-	m.hdr_version = Z_COREDUMP_MEM_HDR_VER;
+	m.id = COREDUMP_MEM_HDR_ID;
+	m.hdr_version = COREDUMP_MEM_HDR_VER;
 
 	if (sizeof(uintptr_t) == 8) {
 		m.start	= sys_cpu_to_le64(start_addr);
@@ -180,7 +181,33 @@ void z_coredump_memory_dump(uintptr_t start_addr, uintptr_t end_addr)
 		m.end = sys_cpu_to_le32(end_addr);
 	}
 
-	z_coredump_buffer_output((uint8_t *)&m, sizeof(m));
+	coredump_buffer_output((uint8_t *)&m, sizeof(m));
 
-	z_coredump_buffer_output((uint8_t *)start_addr, len);
+	coredump_buffer_output((uint8_t *)start_addr, len);
+}
+
+int coredump_query(enum coredump_query_id query_id, void *arg)
+{
+	int ret;
+
+	if (backend_api->query == NULL) {
+		ret = -ENOTSUP;
+	} else {
+		ret = backend_api->query(query_id, arg);
+	}
+
+	return ret;
+}
+
+int coredump_cmd(enum coredump_cmd_id cmd_id, void *arg)
+{
+	int ret;
+
+	if (backend_api->cmd == NULL) {
+		ret = -ENOTSUP;
+	} else {
+		ret = backend_api->cmd(cmd_id, arg);
+	}
+
+	return ret;
 }

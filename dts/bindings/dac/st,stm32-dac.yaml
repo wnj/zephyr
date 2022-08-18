@@ -5,7 +5,7 @@ description: ST STM32 family DAC
 
 compatible: "st,stm32-dac"
 
-include: dac-controller.yaml
+include: [dac-controller.yaml, pinctrl-device.yaml]
 
 properties:
     reg:
@@ -16,6 +16,12 @@ properties:
 
     "#io-channel-cells":
       const: 1
+
+    pinctrl-0:
+      required: true
+
+    pinctrl-names:
+      required: true
 
 io-channel-cells:
     - output

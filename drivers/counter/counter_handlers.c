@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <syscall_handler.h>
-#include <drivers/counter.h>
+#include <zephyr/syscall_handler.h>
+#include <zephyr/drivers/counter.h>
 
 /* For those APIs that just take one argument which is a counter driver
  * instance and return an integral value
@@ -71,6 +71,15 @@ static inline int z_vrfy_counter_get_value(const struct device *dev,
 	Z_OOPS(Z_SYSCALL_MEMORY_WRITE(ticks, sizeof(*ticks)));
 	return z_impl_counter_get_value((const struct device *)dev, ticks);
 }
+
+static inline int z_vrfy_counter_get_value_64(const struct device *dev,
+					   uint64_t *ticks)
+{
+	Z_OOPS(Z_SYSCALL_DRIVER_COUNTER(dev, get_value_64));
+	Z_OOPS(Z_SYSCALL_MEMORY_WRITE(ticks, sizeof(*ticks)));
+	return z_impl_counter_get_value_64((const struct device *)dev, ticks);
+}
+
 #include <syscalls/counter_get_value_mrsh.c>
 
 static inline int z_vrfy_counter_set_channel_alarm(const struct device *dev,
@@ -81,7 +90,7 @@ static inline int z_vrfy_counter_set_channel_alarm(const struct device *dev,
 
 	Z_OOPS(Z_SYSCALL_DRIVER_COUNTER(dev, set_alarm));
 	Z_OOPS(z_user_from_copy(&cfg_copy, alarm_cfg, sizeof(cfg_copy)));
-	Z_OOPS(Z_SYSCALL_VERIFY_MSG(cfg_copy.callback == 0,
+	Z_OOPS(Z_SYSCALL_VERIFY_MSG(cfg_copy.callback == NULL,
 				    "callbacks may not be set from user mode"));
 	return z_impl_counter_set_channel_alarm((const struct device *)dev,
 						(uint8_t)chan_id,
@@ -94,7 +103,7 @@ static inline int z_vrfy_counter_cancel_channel_alarm(const struct device *dev,
 						      uint8_t chan_id)
 {
 	Z_OOPS(Z_SYSCALL_DRIVER_COUNTER(dev, cancel_alarm));
-	return z_vrfy_counter_cancel_channel_alarm((const struct device *)dev,
+	return z_impl_counter_cancel_channel_alarm((const struct device *)dev,
 						   (uint8_t)chan_id);
 }
 #include <syscalls/counter_cancel_channel_alarm_mrsh.c>
@@ -107,7 +116,7 @@ static inline int z_vrfy_counter_set_top_value(const struct device *dev,
 
 	Z_OOPS(Z_SYSCALL_DRIVER_COUNTER(dev, set_top_value));
 	Z_OOPS(z_user_from_copy(&cfg_copy, cfg, sizeof(cfg_copy)));
-	Z_OOPS(Z_SYSCALL_VERIFY_MSG(cfg_copy.callback == 0,
+	Z_OOPS(Z_SYSCALL_VERIFY_MSG(cfg_copy.callback == NULL,
 				    "callbacks may not be set from user mode"));
 	return z_impl_counter_set_top_value((const struct device *)dev,
 					    (const struct counter_top_cfg *)
@@ -128,13 +137,6 @@ static inline uint32_t z_vrfy_counter_get_max_top_value(const struct device *dev
 	return z_impl_counter_get_max_top_value((const struct device *)dev);
 }
 #include <syscalls/counter_get_max_top_value_mrsh.c>
-
-static inline uint32_t z_vrfy_counter_get_max_relative_alarm(const struct device *dev)
-{
-	Z_OOPS(Z_SYSCALL_DRIVER_COUNTER(dev, get_max_relative_alarm));
-	return z_impl_counter_get_max_relative_alarm((const struct device *)dev);
-}
-#include <syscalls/counter_get_max_relative_alarm_mrsh.c>
 
 static inline uint32_t z_vrfy_counter_get_guard_period(const struct device *dev,
 							uint32_t flags)

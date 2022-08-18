@@ -16,11 +16,17 @@ import textwrap
 import traceback
 
 from west import log
-from build_helpers import find_build_dir, is_zephyr_build, \
+from build_helpers import find_build_dir, is_zephyr_build, load_domains, \
     FIND_BUILD_DIR_DESCRIPTION
 from west.commands import CommandError
 from west.configuration import config
 import yaml
+
+from zephyr_ext_common import ZEPHYR_SCRIPTS
+
+# Runners depend on edtlib. Make sure the copy in the tree is
+# available to them before trying to import any.
+sys.path.insert(0, str(ZEPHYR_SCRIPTS / 'dts' / 'python-devicetree' / 'src'))
 
 from runners import get_runner_cls, ZephyrBinaryRunner, MissingProgram
 from runners.core import RunnerConfig
@@ -82,11 +88,8 @@ def add_parser_common(command, parser_adder=None, parser=None):
             help=command.help,
             description=command.description)
 
-    # Remember to update scripts/west-completion.bash if you add or remove
+    # Remember to update west-completion.bash if you add or remove
     # flags
-
-    parser.add_argument('-H', '--context', action='store_true',
-                        help='print build directory specific help')
 
     group = parser.add_argument_group('general options',
                                       FIND_BUILD_DIR_DESCRIPTION)
@@ -101,14 +104,31 @@ def add_parser_common(command, parser_adder=None, parser=None):
                        help='override default runner from --build-dir')
     group.add_argument('--skip-rebuild', action='store_true',
                        help='do not refresh cmake dependencies first')
+    group.add_argument('--domain', action='append',
+                       help='execute runner only for given domain')
 
     group = parser.add_argument_group(
-        'runner configuration overrides',
+        'runner configuration',
         textwrap.dedent(f'''\
-        Run "west {command.name} --context" for --build-dir specific options.
-        Not all runners respect --elf-file / --hex-file / --bin-file, nor use
-        gdb or openocd.'''))
+        ===================================================================
+          IMPORTANT:
+          Individual runners support additional options not printed here.
+        ===================================================================
 
+        Run "west {command.name} --context" for runner-specific options.
+
+        If a build directory is found, --context also prints per-runner
+        settings found in that build directory's runners.yaml file.
+
+        Use "west {command.name} --context -r RUNNER" to limit output to a
+        specific RUNNER.
+
+        Some runner settings also can be overridden with options like
+        --hex-file. However, this depends on the runner: not all runners
+        respect --elf-file / --hex-file / --bin-file, nor use gdb or openocd,
+        etc.'''))
+    group.add_argument('-H', '--context', action='store_true',
+                       help='print runner- and build-specific help')
     # Options used to override RunnerConfig values in runners.yaml.
     # TODO: is this actually useful?
     group.add_argument('--board-dir', metavar='DIR', help='board directory')
@@ -122,12 +142,12 @@ def add_parser_common(command, parser_adder=None, parser=None):
     group.add_argument('--gdb', help='path to GDB')
     group.add_argument('--openocd', help='path to openocd')
     group.add_argument(
-        '--openocd-search', metavar='DIR',
+        '--openocd-search', metavar='DIR', action='append',
         help='path to add to openocd search path, if applicable')
 
     return parser
 
-def do_run_common(command, user_args, user_runner_args):
+def do_run_common(command, user_args, user_runner_args, domains=None):
     # This is the main routine for all the "west flash", "west debug",
     # etc. commands.
 
@@ -135,12 +155,29 @@ def do_run_common(command, user_args, user_runner_args):
         dump_context(command, user_args, user_runner_args)
         return
 
-    command_name = command.name
     build_dir = get_build_dir(user_args)
-    cache = load_cmake_cache(build_dir, user_args)
-    board = cache['CACHED_BOARD']
     if not user_args.skip_rebuild:
         rebuild(command, build_dir, user_args)
+
+    if domains is None:
+        if user_args.domain is None:
+            # No domains are passed down and no domains specified by the user.
+            # So default domain will be used.
+            domains = [load_domains(build_dir).get_default_domain()]
+        else:
+            # No domains are passed down, but user has specified domains to use.
+            # Get the user specified domains.
+            domains = load_domains(build_dir).get_domains(user_args.domain)
+
+    for d in domains:
+        do_run_common_image(command, user_args, user_runner_args, d.build_dir)
+
+def do_run_common_image(command, user_args, user_runner_args, build_dir=None):
+    command_name = command.name
+    if build_dir is None:
+        build_dir = get_build_dir(user_args)
+    cache = load_cmake_cache(build_dir, user_args)
+    board = cache['CACHED_BOARD']
 
     # Load runners.yaml.
     yaml_path = runners_yaml_path(build_dir, board)
@@ -155,7 +192,9 @@ def do_run_common(command, user_args, user_runner_args):
     # Set up runner logging to delegate to west.log commands.
     logger = logging.getLogger('runners')
     logger.setLevel(LOG_LEVEL)
-    logger.addHandler(WestLogHandler())
+    if not logger.hasHandlers():
+        # Only add a runners log handler if none has been added already.
+        logger.addHandler(WestLogHandler())
 
     # If the user passed -- to force the parent argument parser to stop
     # parsing, it will show up here, and needs to be filtered out.
@@ -254,9 +293,8 @@ def load_cmake_cache(build_dir, args):
 
 def rebuild(command, build_dir, args):
     _banner(f'west {command.name}: rebuilding')
-    extra_args = ['--target', 'west_' + command.name + '_depends']
     try:
-        zcmake.run_build(build_dir, extra_args=extra_args)
+        zcmake.run_build(build_dir)
     except CalledProcessError:
         if args.build_dir:
             log.die(f're-build in {args.build_dir} failed')
@@ -308,7 +346,10 @@ def use_runner_cls(command, board, args, runners_yaml, cache):
                 fatal=True)
         log.inf(f'To fix, configure this runner in {board_cmake} and rebuild.')
         sys.exit(1)
-    runner_cls = get_runner_cls(runner)
+    try:
+        runner_cls = get_runner_cls(runner)
+    except ValueError as e:
+        log.die(e)
     if command.name not in runner_cls.capabilities().commands:
         log.die(f'runner {runner} does not support command {command.name}')
 
@@ -334,12 +375,10 @@ def get_runner_config(build_dir, yaml_path, runners_yaml, args=None):
             # directory containing the runners.yaml file.
             return fspath(yaml_dir / from_yaml)
 
-        # FIXME these RunnerConfig values really ought to be
-        # Optional[str], but some runners rely on them being str.
-        return ''
+        return None
 
-    def config(attr):
-        return getattr(args, attr, None) or yaml_config.get(attr)
+    def config(attr, default=None):
+        return getattr(args, attr, None) or yaml_config.get(attr, default)
 
     return RunnerConfig(build_dir,
                         yaml_config['board_dir'],
@@ -348,7 +387,7 @@ def get_runner_config(build_dir, yaml_path, runners_yaml, args=None):
                         output_file('bin'),
                         config('gdb'),
                         config('openocd'),
-                        config('openocd_search'))
+                        config('openocd_search', []))
 
 def dump_traceback():
     # Save the current exception to a file and return its path.

@@ -5,9 +5,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <sys/crc.h>
+#include <zephyr/sys/crc.h>
 
-#include <fs/fcb.h>
+#include <zephyr/fs/fcb.h>
 #include "fcb_priv.h"
 
 /*
@@ -34,7 +34,7 @@ fcb_elem_crc8(struct fcb *fcb, struct fcb_entry *loc, uint8_t *c8p)
 		return -EIO;
 	}
 
-	cnt = fcb_get_len(tmp_str, &len);
+	cnt = fcb_get_len(fcb, tmp_str, &len);
 	if (cnt < 0) {
 		return cnt;
 	}

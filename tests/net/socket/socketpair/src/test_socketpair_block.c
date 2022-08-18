@@ -7,14 +7,14 @@
 #include <fcntl.h>
 #include <string.h>
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(net_test, CONFIG_NET_SOCKETS_LOG_LEVEL);
 
-#include <net/socket.h>
-#include <sys/util.h>
-#include <posix/unistd.h>
+#include <zephyr/net/socket.h>
+#include <zephyr/sys/util.h>
+#include <zephyr/posix/unistd.h>
 
-#include <ztest_assert.h>
+#include <zephyr/ztest_assert.h>
 
 #include "test_socketpair_thread.h"
 
@@ -44,7 +44,7 @@ static void work_handler(struct k_work *work)
 
 	while (true) {
 		if (ctx.write) {
-			LOG_DBG("ctx.m: %u", ctx.m);
+			LOG_DBG("ctx.m: %lu", atomic_get(&ctx.m));
 			if (atomic_get(&ctx.m)
 				< CONFIG_NET_SOCKETPAIR_BUFFER_SIZE) {
 				continue;
@@ -93,10 +93,7 @@ void test_socketpair_write_block(void)
 
 		LOG_DBG("queueing work");
 		k_work_init(&work, work_handler);
-		res = k_work_submit_to_user_queue(&test_socketpair_work_q,
-			&work);
-		zassert_equal(res, 0,
-			"k_work_submit_to_user_queue() failed: %d", res);
+		k_work_submit(&work);
 
 		/* fill up the buffer */
 		for (ctx.m = 0; atomic_get(&ctx.m)
@@ -109,7 +106,7 @@ void test_socketpair_write_block(void)
 				res);
 
 			atomic_inc(&ctx.m);
-			LOG_DBG("have written %u bytes", ctx.m);
+			LOG_DBG("have written %lu bytes", atomic_get(&ctx.m));
 		}
 
 		/* try to write one more byte */
@@ -146,10 +143,7 @@ void test_socketpair_read_block(void)
 
 		LOG_DBG("queueing work");
 		k_work_init(&work, work_handler);
-		res = k_work_submit_to_user_queue(&test_socketpair_work_q,
-			&work);
-		zassert_equal(res, 0,
-			"k_work_submit_to_user_queue() failed: %d", res);
+		k_work_submit(&work);
 
 		/* try to read one byte */
 		LOG_DBG("reading from fd %d", sv[i]);

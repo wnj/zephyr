@@ -6,14 +6,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(flash_stm32generic, CONFIG_FLASH_LOG_LEVEL);
 
-#include <kernel.h>
-#include <device.h>
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
 #include <string.h>
-#include <drivers/flash.h>
-#include <init.h>
+#include <zephyr/drivers/flash.h>
+#include <zephyr/init.h>
 #include <soc.h>
 
 #include "flash_stm32.h"
@@ -83,7 +83,10 @@ static int is_flash_locked(FLASH_TypeDef *regs)
 
 static void write_enable(FLASH_TypeDef *regs)
 {
+	/* Only used for half-page programming on L1x */
+#if !defined(CONFIG_SOC_SERIES_STM32L1X)
 	regs->PECR |= FLASH_PECR_PROG;
+#endif
 }
 
 static void write_disable(FLASH_TypeDef *regs)
@@ -207,11 +210,13 @@ int flash_stm32_write_range(const struct device *dev, unsigned int offset,
 			    const void *data, unsigned int len)
 {
 	int i, rc = 0;
-	const flash_prg_t *values = (const flash_prg_t *)data;
+	flash_prg_t value;
 
 	for (i = 0; i < len / sizeof(flash_prg_t); i++) {
-		rc = write_value(dev, offset + i * sizeof(flash_prg_t),
-				 values[i]);
+		memcpy(&value,
+		       (const uint8_t *)data + i * sizeof(flash_prg_t),
+		       sizeof(flash_prg_t));
+		rc = write_value(dev, offset + i * sizeof(flash_prg_t), value);
 		if (rc < 0) {
 			return rc;
 		}

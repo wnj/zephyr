@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <ztest.h>
 #include <zephyr/types.h>
+#include <zephyr/ztest.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -106,8 +106,9 @@ static void free_parameter(struct parameter *param)
 {
 	unsigned int allocation_index = param - params;
 
-	if (param == NULL)
+	if (param == NULL) {
 		return;
+	}
 	__ASSERT(allocation_index < CONFIG_ZTEST_PARAMETER_COUNT,
 		 "param %p given to free is not in the static buffer %p:%u",
 		 param, params, CONFIG_ZTEST_PARAMETER_COUNT);
@@ -247,6 +248,35 @@ void z_ztest_check_expected_data(const char *fn, const char *name, void *data,
 			PRINT("%s:%s data provided don't match\n", fn, name);
 			ztest_test_fail();
 		}
+	}
+}
+
+void z_ztest_return_data(const char *fn, const char *name, void *val)
+{
+	insert_value(&parameter_list, fn, name, (uintptr_t)val);
+}
+
+void z_ztest_copy_return_data(const char *fn, const char *name, void *data,
+			      uint32_t length)
+{
+	struct parameter *param;
+	void *return_data;
+
+	if (data == NULL) {
+		PRINT("%s:%s received null pointer\n", fn, name);
+		ztest_test_fail();
+		return;
+	}
+
+	param = find_and_delete_value(&parameter_list, fn, name);
+	if (!param) {
+		PRINT("Failed to find parameter %s for %s\n", name, fn);
+		memset(data, 0, length);
+		ztest_test_fail();
+	} else {
+		return_data = (void *)param->value;
+		free_parameter(param);
+		memcpy(data, return_data, length);
 	}
 }
 

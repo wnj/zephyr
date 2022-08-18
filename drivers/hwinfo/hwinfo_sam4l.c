@@ -6,9 +6,9 @@
 
 #define DT_DRV_COMPAT atmel_sam4l_uid
 
-#include <device.h>
-#include <drivers/hwinfo.h>
-#include <init.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/hwinfo.h>
+#include <zephyr/init.h>
 #include <soc.h>
 #include <string.h>
 
@@ -20,7 +20,7 @@ ssize_t z_impl_hwinfo_get_device_id(uint8_t *buffer, size_t length)
 		return 0;
 	}
 
-	if (length > DT_INST_REG_SIZE(0) || length < 0) {
+	if (length > DT_INST_REG_SIZE(0)) {
 		length = DT_INST_REG_SIZE(0);
 	}
 

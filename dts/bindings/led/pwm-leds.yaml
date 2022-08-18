@@ -9,10 +9,13 @@ child-binding:
     description: PWM LED child node
     properties:
         pwms:
-          type: phandle-array
           required: true
+          type: phandle-array
 
         label:
           required: false
           type: string
-          description: Human readable string describing the device (used as device_get_binding() argument)
+          description: |
+            Human readable string describing the LED. It can be used by an
+            application to identify this LED or to retrieve its number/index
+            (i.e. child node number) on the parent device.

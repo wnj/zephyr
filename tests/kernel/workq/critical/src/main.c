@@ -24,9 +24,9 @@
  * @{
  * @}
  */
-#include <zephyr.h>
-#include <linker/sections.h>
-#include <ztest.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/linker/sections.h>
+#include <zephyr/ztest.h>
 
 #define NUM_MILLISECONDS        50
 #define TEST_TIMEOUT            200
@@ -45,7 +45,7 @@ static struct k_work_q offload_work_q;
 static K_THREAD_STACK_DEFINE(offload_work_q_stack,
 			     OFFLOAD_WORKQUEUE_STACK_SIZE);
 
-#define STACK_SIZE (1024 + CONFIG_TEST_EXTRA_STACKSIZE)
+#define STACK_SIZE (1024 + CONFIG_TEST_EXTRA_STACK_SIZE)
 
 static K_THREAD_STACK_DEFINE(stack1, STACK_SIZE);
 static K_THREAD_STACK_DEFINE(stack2, STACK_SIZE);
@@ -166,7 +166,7 @@ void regression_thread(void *arg1, void *arg2, void *arg3)
 		      "Unexpected value for <critical_var>");
 
 	TC_PRINT("Enable timeslicing at %u\n", k_uptime_get_32());
-	k_sched_time_slice_set(10, 10);
+	k_sched_time_slice_set(20, 10);
 
 	k_sem_give(&ALT_SEM);   /* Re-activate alternate_thread() */
 
@@ -196,10 +196,10 @@ void test_offload_workqueue(void)
 	critical_var = 0U;
 	alt_thread_iterations = 0U;
 
-	k_work_q_start(&offload_work_q,
+	k_work_queue_start(&offload_work_q,
 		       offload_work_q_stack,
 		       K_THREAD_STACK_SIZEOF(offload_work_q_stack),
-		       CONFIG_MAIN_THREAD_PRIORITY);
+		       CONFIG_MAIN_THREAD_PRIORITY, NULL);
 
 	k_thread_create(&thread1, stack1, STACK_SIZE,
 			alternate_thread, NULL, NULL, NULL,

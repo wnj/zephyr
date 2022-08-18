@@ -7,14 +7,13 @@
 #include "simplelink_log.h"
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
-#include <zephyr.h>
-#include <kernel.h>
-#include <device.h>
-#include <net/net_if.h>
-#include <net/wifi_mgmt.h>
-#include <net/net_offload.h>
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/net/net_if.h>
+#include <zephyr/net/wifi_mgmt.h>
+#include <zephyr/net/net_offload.h>
 #ifdef CONFIG_NET_SOCKETS_OFFLOAD
-#include <net/socket_offload.h>
+#include <zephyr/net/socket_offload.h>
 #endif
 
 #include <ti/drivers/net/wifi/wlan.h>
@@ -32,7 +31,7 @@ struct simplelink_data {
 	unsigned char mac[6];
 
 	/* Fields for scan API to emulate an asynchronous scan: */
-	struct k_delayed_work work;
+	struct k_work_delayable work;
 	scan_result_cb_t cb;
 	int num_results_or_err;
 	int scan_retries;
@@ -126,7 +125,7 @@ static void simplelink_scan_work_handler(struct k_work *work)
 		if (delay > 0) {
 			LOG_DBG("Retrying scan...");
 		}
-		k_delayed_work_submit(&simplelink_data.work, K_MSEC(delay));
+		k_work_reschedule(&simplelink_data.work, K_MSEC(delay));
 
 	} else {
 		/* Encountered an error, or max retries exceeded: */
@@ -143,7 +142,7 @@ static int simplelink_mgmt_scan(const struct device *dev, scan_result_cb_t cb)
 	int status;
 
 	/* Cancel any previous scan processing in progress: */
-	k_delayed_work_cancel(&simplelink_data.work);
+	k_work_cancel_delayable(&simplelink_data.work);
 
 	/* "Request" the scan: */
 	err = z_simplelink_start_scan();
@@ -160,7 +159,7 @@ static int simplelink_mgmt_scan(const struct device *dev, scan_result_cb_t cb)
 		simplelink_data.num_results_or_err = err;
 		simplelink_data.scan_retries = 0;
 
-		k_delayed_work_submit(&simplelink_data.work, K_MSEC(delay));
+		k_work_reschedule(&simplelink_data.work, K_MSEC(delay));
 		status = 0;
 	} else {
 		status = -EIO;
@@ -199,7 +198,7 @@ static int simplelink_dummy_get(sa_family_t family,
 	return -1;
 }
 
-/* Placeholders, until Zepyr IP stack updated to handle a NULL net_offload */
+/* Placeholders, until Zephyr IP stack updated to handle a NULL net_offload */
 static struct net_offload simplelink_offload = {
 	.get	       = simplelink_dummy_get,
 	.bind	       = NULL,
@@ -258,6 +257,8 @@ static void simplelink_iface_init(struct net_if *iface)
 	/* Direct socket offload: */
 	socket_offload_dns_register(&simplelink_dns_ops);
 	simplelink_sockets_init();
+
+	net_if_socket_offload_set(iface, simplelink_socket_create);
 #endif
 
 }
@@ -274,8 +275,8 @@ static int simplelink_init(const struct device *dev)
 	ARG_UNUSED(dev);
 
 	/* We use system workqueue to deal with scan retries: */
-	k_delayed_work_init(&simplelink_data.work,
-			    simplelink_scan_work_handler);
+	k_work_init_delayable(&simplelink_data.work,
+			      simplelink_scan_work_handler);
 
 	LOG_DBG("SimpleLink driver Initialized");
 
@@ -283,7 +284,7 @@ static int simplelink_init(const struct device *dev)
 }
 
 NET_DEVICE_OFFLOAD_INIT(simplelink, CONFIG_WIFI_SIMPLELINK_NAME,
-			simplelink_init, device_pm_control_nop,
+			simplelink_init, NULL,
 			&simplelink_data, NULL,
 			CONFIG_WIFI_INIT_PRIORITY, &simplelink_api,
 			CONFIG_WIFI_SIMPLELINK_MAX_PACKET_SIZE);

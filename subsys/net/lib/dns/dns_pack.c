@@ -5,7 +5,7 @@
  */
 
 #include <string.h>
-#include <net/buf.h>
+#include <zephyr/net/buf.h>
 
 #include "dns_pack.h"
 
@@ -106,7 +106,8 @@ static int skip_fqdn(uint8_t *answer, int buf_sz)
 	return i;
 }
 
-int dns_unpack_answer(struct dns_msg_t *dns_msg, int dname_ptr, uint32_t *ttl)
+int dns_unpack_answer(struct dns_msg_t *dns_msg, int dname_ptr, uint32_t *ttl,
+		      enum dns_rr_type *type)
 {
 	int dname_len;
 	uint16_t rem_size;
@@ -155,8 +156,9 @@ int dns_unpack_answer(struct dns_msg_t *dns_msg, int dname_ptr, uint32_t *ttl)
 		DNS_COMMON_UINT_SIZE + /* type length */
 		DNS_TTL_LEN +
 		DNS_RDLENGTH_LEN;
+	*type = dns_answer_type(dname_len, answer);
 
-	switch (dns_answer_type(dname_len, answer)) {
+	switch (*type) {
 	case DNS_RR_TYPE_A:
 	case DNS_RR_TYPE_AAAA:
 		set_dns_msg_response(dns_msg, DNS_RESPONSE_IP, pos, len);
@@ -245,7 +247,7 @@ static int dns_msg_pack_query_header(uint8_t *buf, uint16_t size, uint16_t id)
 	 */
 
 	offset = DNS_HEADER_ID_LEN;
-	/* Split the following assignements just in case we need to alter
+	/* Split the following assignments just in case we need to alter
 	 * the flags in future releases
 	 */
 	*(buf + offset) = DNS_FLAGS1;		/* QR, Opcode, AA, TC and RD */
@@ -543,12 +545,10 @@ int dns_unpack_query(struct dns_msg_t *dns_msg, struct net_buf *buf,
 {
 	const uint8_t *end_of_label;
 	uint8_t *dns_query;
-	int remaining_size;
 	int ret;
 	int query_type, query_class;
 
 	dns_query = dns_msg->msg + dns_msg->query_offset;
-	remaining_size = dns_msg->msg_size - dns_msg->query_offset;
 
 	ret = dns_unpack_name(dns_msg->msg, dns_msg->msg_size, dns_query,
 			      buf, &end_of_label);
@@ -557,7 +557,10 @@ int dns_unpack_query(struct dns_msg_t *dns_msg, struct net_buf *buf,
 	}
 
 	query_type = dns_unpack_query_qtype(end_of_label);
-	if (query_type != DNS_RR_TYPE_A && query_type != DNS_RR_TYPE_AAAA) {
+	if (query_type != DNS_RR_TYPE_A && query_type != DNS_RR_TYPE_AAAA
+		&& query_type != DNS_RR_TYPE_PTR
+		&& query_type != DNS_RR_TYPE_SRV
+		&& query_type != DNS_RR_TYPE_TXT) {
 		return -EINVAL;
 	}
 

@@ -8,14 +8,12 @@ import elftools.elf.elffile
 import argparse
 
 ENTRY_SYM = "__start64"
-GCC = "gcc"
-OBJCOPY = "objcopy"
 
 def verbose(msg):
     if args.verbose:
         print(msg)
 
-def build_elf(elf_file):
+def build_elf(elf_file, include_dirs):
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
     cfile = os.path.join(base_dir, "zefi.c")
@@ -49,24 +47,20 @@ def build_elf(elf_file):
             continue
 
         assert h.p_memsz >= h.p_filesz
-        assert (h.p_vaddr % 8) == 0
-        assert (h.p_filesz % 4) == 0
         assert len(seg.data()) == h.p_filesz
 
         if h.p_filesz > 0:
             sd = seg.data()
             verbose("%d bytes of data at 0x%x, data offset %d"
                 % (len(sd), h.p_vaddr, len(data_blob)))
-            data_segs.append((h.p_vaddr, len(sd) / 4, len(data_blob) / 4))
+            data_segs.append((h.p_vaddr, len(sd), len(data_blob)))
             data_blob = data_blob + sd
 
         if h.p_memsz > h.p_filesz:
             bytesz = h.p_memsz - h.p_filesz
-            if bytesz % 4:
-                bytesz += 4 - (bytesz % 4)
             addr = h.p_vaddr + h.p_filesz
             verbose("%d bytes of zero-fill at 0x%x" % (bytesz, addr))
-            zero_segs.append((addr, bytesz / 4))
+            zero_segs.append((addr, bytesz))
 
     verbose(f"{len(data_blob)} bytes of data to include in image")
 
@@ -112,14 +106,17 @@ def build_elf(elf_file):
     #  + We need pic to enforce that the linker adds no relocations
     #  + UEFI can take interrupts on our stack, so no red zone
     #  + UEFI API assumes 16-bit wchar_t
-    cmd = [GCC, "-shared", "-Wall", "-Werror", "-I.",
-        "-fno-stack-protector", "-fpic", "-mno-red-zone", "-fshort-wchar",
-        "-Wl,-nostdlib", "-T", ldscript, "-o", "zefi.elf", cfile]
+    includes = []
+    for include_dir in include_dirs:
+        includes.extend(["-I", include_dir])
+    cmd = ([args.compiler, "-shared", "-Wall", "-Werror", "-I."] + includes +
+           ["-fno-stack-protector", "-fpic", "-mno-red-zone", "-fshort-wchar",
+            "-Wl,-nostdlib", "-T", ldscript, "-o", "zefi.elf", cfile])
     verbose(" ".join(cmd))
     subprocess.run(cmd, check = True)
 
     # Extract the .data segment and append our extra blob
-    cmd = [OBJCOPY, "-O", "binary", "-j", ".data", "zefi.elf", "data.dat"]
+    cmd = [args.objcopy, "-O", "binary", "-j", ".data", "zefi.elf", "data.dat"]
     verbose(" ".join(cmd))
     subprocess.run(cmd, check = True)
 
@@ -129,11 +126,11 @@ def build_elf(elf_file):
     df.close()
 
     # FIXME: this generates warnings about our unused trash section having to be moved to make room.  Set its address far away...
-    subprocess.run([OBJCOPY, "--update-section", ".data=data.dat",
+    subprocess.run([args.objcopy, "--update-section", ".data=data.dat",
                     "zefi.elf"], check = True)
 
     # Convert it to a PE-COFF DLL.
-    cmd = [OBJCOPY, "--target=efi-app-x86_64",
+    cmd = [args.objcopy, "--target=efi-app-x86_64",
         "-j", ".text", "-j", ".reloc", "-j", ".data",
         "zefi.elf", "zephyr.efi"]
     verbose(" ".join(cmd))
@@ -147,13 +144,17 @@ def parse_args():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
 
+    parser.add_argument("-c", "--compiler", required=True, help="Compiler to be used")
+    parser.add_argument("-o", "--objcopy", required=True, help="objcopy to be used")
     parser.add_argument("-f", "--elf-file", required=True, help="Input file")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("-i", "--includes", required=True, nargs="+",
+                        help="Zephyr base include directories")
 
     return parser.parse_args()
 
 if __name__ == "__main__":
 
     args = parse_args()
-    verbose(f"Working on {args.elf_file}...")
-    build_elf(args.elf_file)
+    verbose(f"Working on {args.elf_file} with {args.includes}...")
+    build_elf(args.elf_file, args.includes)

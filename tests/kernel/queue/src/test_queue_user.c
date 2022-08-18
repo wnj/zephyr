@@ -8,7 +8,7 @@
 
 #ifdef CONFIG_USERSPACE
 
-#define STACK_SIZE (512 + CONFIG_TEST_EXTRA_STACKSIZE)
+#define STACK_SIZE (512 + CONFIG_TEST_EXTRA_STACK_SIZE)
 #define LIST_LEN        5
 
 static K_THREAD_STACK_DEFINE(child_stack, STACK_SIZE);
@@ -70,7 +70,7 @@ void child_thread_get(void *p1, void *p2, void *p3)
  * @see k_queue_append(), k_queue_alloc_append(),
  * k_queue_init(), k_queue_cancel_wait()
  */
-void test_queue_supv_to_user(void)
+ZTEST(queue_api_1cpu, test_queue_supv_to_user)
 {
 	/* Supervisor mode will add a bunch of data, some with alloc
 	 * and some not
@@ -78,6 +78,10 @@ void test_queue_supv_to_user(void)
 
 	struct k_queue *q;
 	struct k_sem *sem;
+
+	if (!(IS_ENABLED(CONFIG_USERSPACE))) {
+		ztest_test_skip();
+	}
 
 	q = k_object_alloc(K_OBJ_QUEUE);
 	zassert_not_null(q, "no memory for allocated queue object");
@@ -126,7 +130,7 @@ void test_queue_supv_to_user(void)
  *
  * @see k_queue_alloc_prepend()
  */
-void test_queue_alloc_prepend_user(void)
+ZTEST_USER(queue_api, test_queue_alloc_prepend_user)
 {
 	struct k_queue *q;
 
@@ -160,7 +164,7 @@ void test_queue_alloc_prepend_user(void)
  *
  * @see k_queue_init(), k_queue_alloc_append()
  */
-void test_queue_alloc_append_user(void)
+ZTEST_USER(queue_api, test_queue_alloc_append_user)
 {
 	struct k_queue *q;
 
@@ -185,9 +189,8 @@ void test_queue_alloc_append_user(void)
 /**
  * @brief Test to verify free of allocated elements of queue
  * @ingroup kernel_queue_tests
- * @see k_mem_pool_alloc(), k_mem_pool_free()
  */
-void test_auto_free(void)
+ZTEST(queue_api, test_auto_free)
 {
 	/* Ensure any resources requested by the previous test were released
 	 * by allocating the entire pool. It would have allocated two kernel
@@ -195,21 +198,20 @@ void test_auto_free(void)
 	 * auto-freed when they are de-queued, and the objects when all
 	 * threads with permissions exit.
 	 */
-
-	struct k_mem_block b[4];
+	void *b[4];
 	int i;
 
-	for (i = 0; i < 4; i++) {
-		zassert_false(k_mem_pool_alloc(&test_pool, &b[i], 64,
-					       K_FOREVER),
-			      "memory not auto released!");
+	if (!(IS_ENABLED(CONFIG_USERSPACE))) {
+		ztest_test_skip();
 	}
 
-	/* Free everything so that the pool is back to a pristine state in
-	 * case we want to use it again.
-	 */
 	for (i = 0; i < 4; i++) {
-		k_mem_pool_free(&b[i]);
+		b[i] = k_heap_alloc(&test_pool, 64, K_FOREVER);
+		zassert_true(b[i] != NULL, "memory not auto released!");
+	}
+
+	for (i = 0; i < 4; i++) {
+		k_heap_free(&test_pool, b[i]);
 	}
 }
 

@@ -91,6 +91,9 @@ The frdm_k22f board configuration supports the following hardware features:
 | SENSOR    | off-chip   | fxos8700 polling;                   |
 |           |            | fxos8700 trigger                    |
 +-----------+------------+-------------------------------------+
+| RNGA      | on-chip    | entropy;                            |
+|           |            | random                              |
++-----------+------------+-------------------------------------+
 
 The default configuration can be found in the defconfig file:
 
@@ -128,7 +131,7 @@ The K22F SoC has five pairs of pinmux/gpio controllers.
 +-------+-----------------+---------------------------+
 | PTD3  | UART2_TX        | UART BT HCI               |
 +-------+-----------------+---------------------------+
-| PTD4  | SPI0_PCS1       | SPI                       |
+| PTC4  | SPI0_PCS0       | SPI                       |
 +-------+-----------------+---------------------------+
 | PTD1  | SPI0_SCK        | SPI                       |
 +-------+-----------------+---------------------------+

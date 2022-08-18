@@ -30,7 +30,9 @@
 #ifndef _COVERAGE_H_
 #define _COVERAGE_H_
 
-#if (__GNUC__ >= 8)
+#if (__GNUC__ >= 10)
+#define GCOV_COUNTERS 8U
+#elif (__GNUC__ >= 8)
 #define GCOV_COUNTERS 9U
 #else
 #define GCOV_COUNTERS 10U
@@ -73,7 +75,7 @@ struct gcov_ctr_info {
 struct gcov_fn_info {
 	const struct gcov_info *key;     /* comdat key */
 	unsigned int ident;              /* unique ident of function */
-	unsigned int lineno_checksum;    /* function lineo_checksum */
+	unsigned int lineno_checksum;    /* function lineno_checksum */
 	unsigned int cfg_checksum;       /* function cfg checksum */
 	struct gcov_ctr_info ctrs[0];    /* instrumented counters */
 };

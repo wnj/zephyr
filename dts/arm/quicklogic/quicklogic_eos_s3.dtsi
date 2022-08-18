@@ -6,6 +6,7 @@
 
 #include <mem.h>
 #include <arm/armv7-m.dtsi>
+#include <zephyr/dt-bindings/gpio/gpio.h>
 
 / {
 	cpus {
@@ -45,7 +46,16 @@
 			clocks = <&uartclk>;
 			interrupts = <7 3>;
 			interrupt-names = "rx";
-			label = "UART_0";
+		};
+
+		gpio: gpio {
+			compatible = "quicklogic,eos-s3-gpio";
+			status = "disabled";
+			interrupts = <5 2>;
+			#gpio-cells = <2>;
+			ngpios = <8>;
+			pin-secondary-config = <0x00>;
+			gpio-controller;
 		};
 	};
 };

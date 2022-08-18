@@ -14,20 +14,30 @@ properties:
   reg:
     required: true
 
-  label:
-    required: true
-
   jedec-id:
     required: true
 
   size:
-    required: true
+    type: int
+    required: false
+    description: |
+      The size in bits. Set this or size-in-bytes, but not both.
+
+  size-in-bytes:
+    type: int
+    required: false
+    description: |
+      The size in bytes. Set this or size, but not both.
+
+  # Match original driver NORDIC_QSPI_NOR_QE_BIT Kconfig default.
+  quad-enable-requirements:
+    default: "S1B6"
 
   readoc:
     type: string
     required: false
     enum:
-      - "fastread"        # Single data line SPI, FAST_READ (0x08)
+      - "fastread"        # Single data line SPI, FAST_READ (0x0B)
       - "read2o"          # Dual data line SPI, READ2O (0x3B)
       - "read2io"         # Dual data line SPI, READ2IO (0xBB)
       - "read4o"          # Quad data line SPI, READ4O (0x6B)
@@ -42,7 +52,7 @@ properties:
     enum:
       - "pp"            # Single data line SPI, PP (0x02)
       - "pp2o"          # Dual data line SPI, PP2O (0xA2)
-      - "pp4o"          # Dual data line SPI, PP4O (0x32)
+      - "pp4o"          # Quad data line SPI, PP4O (0x32)
       - "pp4io"         # Quad data line SPI, PP4IO (0x38)
     description: |
       Specify the number of data lines and opcode used for writing.
@@ -69,6 +79,13 @@ properties:
     description: |
       Number of clock cycles CSn must be asserted before it can go low
       again, specified in nanoseconds.
+
+  rx-delay:
+    type: int
+    required: false
+    description: |
+      Number of clock cycles from the rising edge of the SPI clock
+      until the input serial data is sampled.
 
   cpha:
     type: boolean

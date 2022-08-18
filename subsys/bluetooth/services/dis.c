@@ -14,16 +14,16 @@
 #include <stddef.h>
 #include <string.h>
 #include <errno.h>
-#include <zephyr.h>
-#include <init.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/init.h>
 
-#include <settings/settings.h>
+#include <zephyr/settings/settings.h>
 
-#include <bluetooth/bluetooth.h>
-#include <bluetooth/hci.h>
-#include <bluetooth/conn.h>
-#include <bluetooth/uuid.h>
-#include <bluetooth/gatt.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/bluetooth/gatt.h>
 
 #define BT_DBG_ENABLED IS_ENABLED(CONFIG_BT_DEBUG_SERVICE)
 #define LOG_MODULE_NAME bt_dis
@@ -141,7 +141,7 @@ BT_GATT_SERVICE_DEFINE(dis_svc,
 
 );
 
-#if defined(CONFIG_BT_SETTINGS) && defined(CONFIG_BT_DIS_SETTINGS)
+#if defined(CONFIG_BT_DIS_SETTINGS)
 static int dis_set(const char *name, size_t len_rd,
 		   settings_read_cb read_cb, void *store)
 {
@@ -236,4 +236,4 @@ static int dis_set(const char *name, size_t len_rd,
 
 SETTINGS_STATIC_HANDLER_DEFINE(bt_dis, "bt/dis", NULL, dis_set, NULL, NULL);
 
-#endif /* CONFIG_BT_DIS_SETTINGS && CONFIG_BT_SETTINGS*/
+#endif /* CONFIG_BT_DIS_SETTINGS*/

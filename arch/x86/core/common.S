@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <arch/x86/multiboot.h>
+#include <zephyr/arch/x86/multiboot.h>
 
 /*
  * This is included by ia32/crt0.S and intel64/locore.S
@@ -24,17 +24,6 @@
 	je 1f
 	xorl %ebx, %ebx
 1:
-#endif
-
-#ifdef CONFIG_BOOT_TIME_MEASUREMENT
-	/*
-	 * Boot time measurements use TSC as a datum; zero it.
-	 */
-
-	xorl %eax, %eax
-	xorl %edx, %edx
-	movl $X86_TIME_STAMP_COUNTER_MSR, %ecx
-	wrmsr
 #endif
 
 #ifdef CONFIG_PIC_DISABLE

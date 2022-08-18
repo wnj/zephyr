@@ -7,7 +7,7 @@
 /* Tests of functions in testfs_util */
 
 #include <string.h>
-#include <ztest.h>
+#include <zephyr/ztest.h>
 #include "testfs_tests.h"
 #include "testfs_lfs.h"
 
@@ -23,7 +23,8 @@ void test_main(void)
 			 ztest_unit_test(test_lfs_basic),
 			 ztest_unit_test(test_lfs_dirops),
 			 ztest_unit_test(test_lfs_perf),
-			 ztest_unit_test(test_fs_open_flags_lfs)
+			 ztest_unit_test(test_fs_open_flags_lfs),
+			 ztest_unit_test(test_fs_mount_flags)
 			 );
 	ztest_run_test_suite(littlefs_test);
 }

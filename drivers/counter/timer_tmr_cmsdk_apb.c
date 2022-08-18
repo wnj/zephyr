@@ -6,12 +6,12 @@
 
 #define DT_DRV_COMPAT arm_cmsdk_timer
 
-#include <drivers/counter.h>
-#include <device.h>
+#include <zephyr/drivers/counter.h>
+#include <zephyr/device.h>
 #include <errno.h>
-#include <init.h>
+#include <zephyr/init.h>
 #include <soc.h>
-#include <drivers/clock_control/arm_clock_control.h>
+#include <zephyr/drivers/clock_control/arm_clock_control.h>
 
 #include "timer_cmsdk_apb.h"
 
@@ -147,8 +147,11 @@ static int tmr_cmsdk_apb_init(const struct device *dev)
 
 #ifdef CONFIG_CLOCK_CONTROL
 	/* Enable clock for subsystem */
-	const struct device *clk =
-		device_get_binding(CONFIG_ARM_CLOCK_CONTROL_DEV_NAME);
+	const struct device *clk = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(0));
+
+	if (!device_is_ready(clk)) {
+		return -ENODEV;
+	}
 
 #ifdef CONFIG_SOC_SERIES_BEETLE
 	clock_control_on(clk, (clock_control_subsys_t *) &cfg->timer_cc_as);
@@ -186,12 +189,12 @@ static int tmr_cmsdk_apb_init(const struct device *dev)
 		.load = UINT32_MAX,					\
 	};								\
 									\
-	DEVICE_AND_API_INIT(tmr_cmsdk_apb_##inst,			\
-			    DT_INST_LABEL(inst),			\
+	DEVICE_DT_INST_DEFINE(inst,					\
 			    tmr_cmsdk_apb_init,				\
+			    NULL,			\
 			    &tmr_cmsdk_apb_dev_data_##inst,		\
 			    &tmr_cmsdk_apb_cfg_##inst, POST_KERNEL,	\
-			    CONFIG_KERNEL_INIT_PRIORITY_DEVICE,		\
+			    CONFIG_COUNTER_INIT_PRIORITY,		\
 			    &tmr_cmsdk_apb_api);			\
 									\
 	static void timer_cmsdk_apb_config_##inst(const struct device *dev) \
@@ -199,7 +202,7 @@ static int tmr_cmsdk_apb_init(const struct device *dev)
 		IRQ_CONNECT(DT_INST_IRQN(inst),				\
 			    DT_INST_IRQ(inst, priority),		\
 			    tmr_cmsdk_apb_isr,				\
-			    DEVICE_GET(tmr_cmsdk_apb_##inst),		\
+			    DEVICE_DT_INST_GET(inst),			\
 			    0);						\
 		irq_enable(DT_INST_IRQN(inst));				\
 	}

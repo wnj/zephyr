@@ -4,36 +4,50 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr.h>
-#include <ztest.h>
-#include <drivers/flash.h>
-#include <devicetree.h>
-#include <storage/flash_map.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/ztest.h>
+#include <zephyr/drivers/flash.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/storage/flash_map.h>
 
 #if (CONFIG_NORDIC_QSPI_NOR - 0)
-#define FLASH_DEVICE DT_LABEL(DT_INST(0, nordic_qspi_nor))
-#define FLASH_TEST_REGION_OFFSET 0xff000
-#define TEST_AREA_MAX DT_PROP(DT_INST(0, nordic_qspi_nor), size)
+/* Nothing here */
+#elif defined(CONFIG_TRUSTED_EXECUTION_NONSECURE)
+/* SoC embedded NVM */
+#define TEST_AREA	image_1_nonsecure
 #else
-
-/* SoC emebded NVM */
-#define FLASH_DEVICE DT_CHOSEN_ZEPHYR_FLASH_CONTROLLER_LABEL
-
-#ifdef CONFIG_TRUSTED_EXECUTION_NONSECURE
-#define FLASH_TEST_REGION_OFFSET FLASH_AREA_OFFSET(image_1_nonsecure)
-#define TEST_AREA_MAX (FLASH_TEST_REGION_OFFSET +\
-		       FLASH_AREA_SIZE(image_1_nonsecure))
-#else
-#define FLASH_TEST_REGION_OFFSET FLASH_AREA_OFFSET(image_1)
-#define TEST_AREA_MAX (FLASH_TEST_REGION_OFFSET + FLASH_AREA_SIZE(image_1))
+#define TEST_AREA	storage
 #endif
 
+/* TEST_AREA is only defined for configurations that realy on
+ * fixed-partition nodes.
+ */
+#ifdef TEST_AREA
+#define TEST_AREA_OFFSET	FLASH_AREA_OFFSET(TEST_AREA)
+#define TEST_AREA_SIZE		FLASH_AREA_SIZE(TEST_AREA)
+#define TEST_AREA_MAX		(TEST_AREA_OFFSET + TEST_AREA_SIZE)
+#define TEST_AREA_DEVICE	FLASH_AREA_DEVICE(TEST_AREA)
+
+#elif (CONFIG_NORDIC_QSPI_NOR - 0)
+#define TEST_AREA_DEVICE	DEVICE_DT_GET(DT_INST(0, nordic_qspi_nor))
+#define TEST_AREA_OFFSET	0xff000
+
+#define TEST_AREA_DEV_NODE	DT_INST(0, nordic_qspi_nor)
+
+#if DT_NODE_HAS_PROP(TEST_AREA_DEV_NODE, size_in_bytes)
+#define TEST_AREA_MAX DT_PROP(TEST_AREA_DEV_NODE, size_in_bytes)
+#else
+#define TEST_AREA_MAX (DT_PROP(TEST_AREA_DEV_NODE, size) / 8)
+#endif
+
+#else
+#error "Unsupported configuraiton"
 #endif
 
 #define EXPECTED_SIZE	256
 #define CANARY		0xff
 
-static const struct device *flash_dev;
+static const struct device *flash_dev = TEST_AREA_DEVICE;
 static struct flash_pages_info page_info;
 static uint8_t __aligned(4) expected[EXPECTED_SIZE];
 
@@ -41,18 +55,19 @@ static void test_setup(void)
 {
 	int rc;
 
-	flash_dev = device_get_binding(FLASH_DEVICE);
-	const struct flash_parameters *qspi_flash_parameters =
+	zassert_true(device_is_ready(flash_dev), NULL);
+
+	const struct flash_parameters *flash_params =
 			flash_get_parameters(flash_dev);
 
 	/* For tests purposes use page (in nrf_qspi_nor page = 64 kB) */
-	flash_get_page_info_by_offs(flash_dev, FLASH_TEST_REGION_OFFSET,
+	flash_get_page_info_by_offs(flash_dev, TEST_AREA_OFFSET,
 				    &page_info);
 
 	/* Check if test region is not empty */
 	uint8_t buf[EXPECTED_SIZE];
 
-	rc = flash_read(flash_dev, FLASH_TEST_REGION_OFFSET,
+	rc = flash_read(flash_dev, TEST_AREA_OFFSET,
 			buf, EXPECTED_SIZE);
 	zassert_equal(rc, 0, "Cannot read flash");
 
@@ -62,14 +77,14 @@ static void test_setup(void)
 	}
 
 	/* Check if tested region fits in flash */
-	zassert_true((FLASH_TEST_REGION_OFFSET + EXPECTED_SIZE) < TEST_AREA_MAX,
+	zassert_true((TEST_AREA_OFFSET + EXPECTED_SIZE) < TEST_AREA_MAX,
 		     "Test area exceeds flash size");
 
 	/* Check if flash is cleared */
 	bool is_buf_clear = true;
 
 	for (off_t i = 0; i < EXPECTED_SIZE; i++) {
-		if (buf[i] != qspi_flash_parameters->erase_value) {
+		if (buf[i] != flash_params->erase_value) {
 			is_buf_clear = false;
 			break;
 		}

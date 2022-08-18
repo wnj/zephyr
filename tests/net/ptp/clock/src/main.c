@@ -7,8 +7,10 @@
  */
 
 #define NET_LOG_LEVEL CONFIG_NET_L2_ETHERNET_LOG_LEVEL
+/* Custom PTP device name to avoid conflicts with PTP devices on SOC */
+#define PTP_VIRT_CLOCK_NAME "PTP_CLOCK_VIRT"
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_test, NET_LOG_LEVEL);
 
 #include <zephyr/types.h>
@@ -16,20 +18,20 @@ LOG_MODULE_REGISTER(net_test, NET_LOG_LEVEL);
 #include <stddef.h>
 #include <string.h>
 #include <errno.h>
-#include <sys/printk.h>
-#include <linker/sections.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/linker/sections.h>
 
-#include <ztest.h>
+#include <zephyr/ztest.h>
 
-#include <ptp_clock.h>
-#include <net/ptp_time.h>
+#include <zephyr/drivers/ptp_clock.h>
+#include <zephyr/net/ptp_time.h>
 
-#include <net/ethernet.h>
-#include <net/buf.h>
-#include <net/net_ip.h>
-#include <net/net_l2.h>
+#include <zephyr/net/ethernet.h>
+#include <zephyr/net/buf.h>
+#include <zephyr/net/net_ip.h>
+#include <zephyr/net/net_l2.h>
 
-#include <random/rand32.h>
+#include <zephyr/random/rand32.h>
 
 #define NET_LOG_ENABLED 1
 #include "net_private.h"
@@ -157,16 +159,16 @@ static int eth_init(const struct device *dev)
 	return 0;
 }
 
-ETH_NET_DEVICE_INIT(eth_test_1, "eth_test_1", eth_init, device_pm_control_nop,
-		    &eth_context_1, NULL, CONFIG_ETH_INIT_PRIORITY, &api_funcs,
+ETH_NET_DEVICE_INIT(eth3_test, "eth3_test", eth_init, NULL,
+		    &eth_context_3, NULL, CONFIG_ETH_INIT_PRIORITY, &api_funcs,
 		    NET_ETH_MTU);
 
-ETH_NET_DEVICE_INIT(eth_test_2, "eth_test_2", eth_init, device_pm_control_nop,
+ETH_NET_DEVICE_INIT(eth2_test, "eth2_test", eth_init, NULL,
 		    &eth_context_2, NULL, CONFIG_ETH_INIT_PRIORITY, &api_funcs,
 		    NET_ETH_MTU);
 
-ETH_NET_DEVICE_INIT(eth_test_3, "eth_test_3", eth_init, device_pm_control_nop,
-		    &eth_context_3, NULL, CONFIG_ETH_INIT_PRIORITY, &api_funcs,
+ETH_NET_DEVICE_INIT(eth1_test, "eth1_test", eth_init, NULL,
+		    &eth_context_1, NULL, CONFIG_ETH_INIT_PRIORITY, &api_funcs,
 		    NET_ETH_MTU);
 
 static uint64_t timestamp_to_nsec(struct net_ptp_time *ts)
@@ -187,7 +189,7 @@ static int my_ptp_clock_set(const struct device *dev, struct net_ptp_time *tm)
 	struct ptp_context *ptp_ctx = dev->data;
 	struct eth_context *eth_ctx = ptp_ctx->eth_context;
 
-	if (&eth_context_1 != eth_ctx && &eth_context_2 != eth_ctx) {
+	if (&eth_context_3 != eth_ctx && &eth_context_2 != eth_ctx) {
 		zassert_true(false, "Context pointers do not match\n");
 	}
 
@@ -216,7 +218,7 @@ static int my_ptp_clock_adjust(const struct device *dev, int increment)
 	return 0;
 }
 
-static int my_ptp_clock_rate_adjust(const struct device *dev, float ratio)
+static int my_ptp_clock_rate_adjust(const struct device *dev, double ratio)
 {
 	return 0;
 }
@@ -233,7 +235,7 @@ static const struct ptp_clock_driver_api api = {
 
 static int ptp_test_1_init(const struct device *port)
 {
-	const struct device *eth_dev = DEVICE_GET(eth_test_1);
+	const struct device *eth_dev = DEVICE_GET(eth3_test);
 	struct eth_context *context = eth_dev->data;
 	struct ptp_context *ptp_context = port->data;
 
@@ -243,13 +245,13 @@ static int ptp_test_1_init(const struct device *port)
 	return 0;
 }
 
-DEVICE_AND_API_INIT(ptp_clock_1, PTP_CLOCK_NAME, ptp_test_1_init,
-		    &ptp_test_1_context, NULL, POST_KERNEL,
-		    CONFIG_APPLICATION_INIT_PRIORITY, &api);
+DEVICE_DEFINE(ptp_clock_1, PTP_VIRT_CLOCK_NAME, ptp_test_1_init,
+		NULL, &ptp_test_1_context, NULL,
+		POST_KERNEL, CONFIG_APPLICATION_INIT_PRIORITY, &api);
 
 static int ptp_test_2_init(const struct device *port)
 {
-	const struct device *eth_dev = DEVICE_GET(eth_test_2);
+	const struct device *eth_dev = DEVICE_GET(eth2_test);
 	struct eth_context *context = eth_dev->data;
 	struct ptp_context *ptp_context = port->data;
 
@@ -259,9 +261,9 @@ static int ptp_test_2_init(const struct device *port)
 	return 0;
 }
 
-DEVICE_AND_API_INIT(ptp_clock_2, PTP_CLOCK_NAME, ptp_test_2_init,
-		    &ptp_test_2_context, NULL, POST_KERNEL,
-		    CONFIG_APPLICATION_INIT_PRIORITY, &api);
+DEVICE_DEFINE(ptp_clock_2, PTP_VIRT_CLOCK_NAME, ptp_test_2_init,
+		NULL, &ptp_test_2_context, NULL,
+		POST_KERNEL, CONFIG_APPLICATION_INIT_PRIORITY, &api);
 
 struct user_data {
 	int eth_if_count;
@@ -284,6 +286,19 @@ static const char *iface2str(struct net_if *iface)
 static void iface_cb(struct net_if *iface, void *user_data)
 {
 	struct user_data *ud = user_data;
+
+	/*
+	 * The below code is to only use struct net_if devices defined in this
+	 * test as board on which it is run can have its own set of interfaces.
+	 *
+	 * As a result one will not rely on linker's specific 'net_if_area'
+	 * placement.
+	 */
+	if ((iface != net_if_lookup_by_dev(DEVICE_GET(eth3_test))) &&
+	    (iface != net_if_lookup_by_dev(DEVICE_GET(eth2_test))) &&
+	    (iface != net_if_lookup_by_dev(DEVICE_GET(eth1_test)))) {
+		return;
+	}
 
 	DBG("Interface %p (%s) [%d]\n", iface, iface2str(iface),
 	    net_if_get_by_iface(iface));
@@ -323,11 +338,11 @@ static void test_check_interfaces(void)
 	net_if_foreach(iface_cb, &ud);
 
 	zassert_equal(ud.eth_if_count, MAX_NUM_INTERFACES,
-		      "Invalid numer of ethernet interfaces %d vs %d\n",
+		      "Invalid number of ethernet interfaces %d vs %d\n",
 		      ud.eth_if_count, MAX_NUM_INTERFACES);
 
 	zassert_equal(ud.total_if_count, ud.eth_if_count,
-		      "Invalid numer of interfaces %d vs %d\n",
+		      "Invalid number of interfaces %d vs %d\n",
 		      ud.total_if_count, ud.eth_if_count);
 }
 
@@ -356,7 +371,7 @@ static void test_address_setup(void)
 		zassert_not_null(ifaddr, "addr1\n");
 	}
 
-	/* For testing purposes we need to set the adddresses preferred */
+	/* For testing purposes we need to set the addresses preferred */
 	ifaddr->addr_state = NET_ADDR_PREFERRED;
 
 	ifaddr = net_if_ipv6_addr_add(iface1, &ll_addr,
@@ -548,26 +563,28 @@ static void test_ptp_clock_get_user(void)
 	test_ptp_clock_get_by_xxx("user");
 }
 
-void test_main(void)
+void *setup(void)
 {
 	const struct device *clk;
 
-	clk = device_get_binding(PTP_CLOCK_NAME);
+	clk = device_get_binding(PTP_VIRT_CLOCK_NAME);
 	if (clk != NULL) {
 		k_object_access_grant(clk, k_current_get());
 	}
-
-	ztest_test_suite(ptp_clock_test,
-			 ztest_unit_test(test_check_interfaces),
-			 ztest_unit_test(test_address_setup),
-			 ztest_unit_test(test_ptp_clock_interfaces),
-			 ztest_unit_test(test_ptp_clock_iface_1),
-			 ztest_unit_test(test_ptp_clock_iface_2),
-			 ztest_unit_test(test_ptp_clock_get_by_index),
-			 ztest_user_unit_test(test_ptp_clock_get_by_index_user),
-			 ztest_unit_test(test_ptp_clock_get_kernel),
-			 ztest_user_unit_test(test_ptp_clock_get_user)
-			 );
-
-	ztest_run_test_suite(ptp_clock_test);
+	return NULL;
 }
+
+ZTEST(ptp_clock_test_suite, test_ptp_clock)
+{
+	test_check_interfaces();
+	test_address_setup();
+	test_ptp_clock_interfaces();
+	test_ptp_clock_iface_1();
+	test_ptp_clock_iface_2();
+	test_ptp_clock_get_by_index();
+	test_ptp_clock_get_by_index_user();
+	test_ptp_clock_get_kernel();
+	test_ptp_clock_get_user();
+}
+
+ZTEST_SUITE(ptp_clock_test_suite, NULL, setup, NULL, NULL, NULL);

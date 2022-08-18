@@ -12,24 +12,36 @@
  * hardware for the nxp_lpc55s69 platform.
  */
 
-#include <kernel.h>
-#include <device.h>
-#include <init.h>
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/init.h>
 #include <soc.h>
-#include <drivers/uart.h>
-#include <linker/sections.h>
-#include <arch/cpu.h>
+#include <zephyr/drivers/uart.h>
+#include <zephyr/linker/sections.h>
+#include <zephyr/arch/cpu.h>
 #include <aarch32/cortex_m/exc.h>
 #include <fsl_power.h>
 #include <fsl_clock.h>
 #include <fsl_common.h>
 #include <fsl_device_registers.h>
 
+#if CONFIG_USB_DC_NXP_LPCIP3511
+#include "usb_phy.h"
+#include "usb_dc_mcux.h"
+#endif
+
+
 #define SYSTEM_IS_XIP_FLEXSPI() \
 	((((uint32_t)nxp_rt600_init >= 0x08000000U) &&		\
 	  ((uint32_t)nxp_rt600_init < 0x10000000U)) ||		\
 	 (((uint32_t)nxp_rt600_init >= 0x18000000U) &&		\
 	  ((uint32_t)nxp_rt600_init < 0x20000000U)))
+
+#define CTIMER_CLOCK_SOURCE(node_id) \
+	TO_CTIMER_CLOCK_SOURCE(DT_CLOCKS_CELL(node_id, name), DT_PROP(node_id, clk_source))
+#define TO_CTIMER_CLOCK_SOURCE(inst, val) TO_CLOCK_ATTACH_ID(inst, val)
+#define TO_CLOCK_ATTACH_ID(inst, val) CLKCTL1_TUPLE_MUXA(CT32BIT##inst##FCLKSEL_OFFSET, val)
+#define CTIMER_CLOCK_SETUP(node_id) CLOCK_AttachClk(CTIMER_CLOCK_SOURCE(node_id));
 
 #ifdef CONFIG_INIT_SYS_PLL
 const clock_sys_pll_config_t g_sysPllConfig = {
@@ -49,6 +61,13 @@ const clock_audio_pll_config_t g_audioPllConfig = {
 };
 #endif
 
+#if CONFIG_USB_DC_NXP_LPCIP3511
+/* USB PHY condfiguration */
+#define BOARD_USB_PHY_D_CAL (0x0CU)
+#define BOARD_USB_PHY_TXCAL45DP (0x06U)
+#define BOARD_USB_PHY_TXCAL45DM (0x06U)
+#endif
+
 #ifdef CONFIG_NXP_IMX_RT6XX_BOOT_HEADER
 extern char z_main_stack[];
 extern char _flash_used[];
@@ -63,7 +82,7 @@ extern void z_arm_secure_fault(void);
 extern void z_arm_svc(void);
 extern void z_arm_debug_monitor(void);
 extern void z_arm_pendsv(void);
-extern void z_clock_isr(void);
+extern void sys_clock_isr(void);
 extern void z_arm_exc_spurious(void);
 
 __imx_boot_ivt_section void (* const image_vector_table[])(void)  = {
@@ -86,51 +105,95 @@ __imx_boot_ivt_section void (* const image_vector_table[])(void)  = {
 	z_arm_debug_monitor,	/* 0x30 */
 	(void (*)())image_vector_table,		/* 0x34, imageLoadAddress. */
 	z_arm_pendsv,						/* 0x38 */
-#if defined(CONFIG_SYS_CLOCK_EXISTS)
-	z_clock_isr,						/* 0x3C */
+#if defined(CONFIG_SYS_CLOCK_EXISTS) && \
+	defined(CONFIG_CORTEX_M_SYSTICK_INSTALL_ISR)
+	sys_clock_isr,						/* 0x3C */
 #else
 	z_arm_exc_spurious,
 #endif
 };
 #endif /* CONFIG_NXP_IMX_RT6XX_BOOT_HEADER */
 
-/**
- *
- * @brief Initialize the system clock
- *
- * @return N/A
- *
- */
+#if CONFIG_USB_DC_NXP_LPCIP3511
 
+static void usb_device_clock_init(void)
+{
+	uint8_t usbClockDiv = 1;
+	uint32_t usbClockFreq;
+	usb_phy_config_struct_t phyConfig = {
+		BOARD_USB_PHY_D_CAL,
+		BOARD_USB_PHY_TXCAL45DP,
+		BOARD_USB_PHY_TXCAL45DM,
+	};
+
+	/* enable USB IP clock */
+	CLOCK_SetClkDiv(kCLOCK_DivPfc1Clk, 5);
+	CLOCK_AttachClk(kXTALIN_CLK_to_USB_CLK);
+	CLOCK_SetClkDiv(kCLOCK_DivUsbHsFclk, usbClockDiv);
+	CLOCK_EnableUsbhsDeviceClock();
+	RESET_PeripheralReset(kUSBHS_PHY_RST_SHIFT_RSTn);
+	RESET_PeripheralReset(kUSBHS_DEVICE_RST_SHIFT_RSTn);
+	RESET_PeripheralReset(kUSBHS_HOST_RST_SHIFT_RSTn);
+	RESET_PeripheralReset(kUSBHS_SRAM_RST_SHIFT_RSTn);
+	/*Make sure USBHS ram buffer has power up*/
+	POWER_DisablePD(kPDRUNCFG_APD_USBHS_SRAM);
+	POWER_DisablePD(kPDRUNCFG_PPD_USBHS_SRAM);
+	POWER_ApplyPD();
+
+	/* save usb ip clock freq*/
+	usbClockFreq = g_xtalFreq / usbClockDiv;
+	/* enable USB PHY PLL clock, the phy bus clock (480MHz) source is same with USB IP */
+	CLOCK_EnableUsbHs0PhyPllClock(kXTALIN_CLK_to_USB_CLK, usbClockFreq);
+
+#if defined(FSL_FEATURE_USBHSD_USB_RAM) && (FSL_FEATURE_USBHSD_USB_RAM)
+	for (int i = 0; i < FSL_FEATURE_USBHSD_USB_RAM; i++) {
+		((uint8_t *)FSL_FEATURE_USBHSD_USB_RAM_BASE_ADDRESS)[i] = 0x00U;
+	}
+#endif
+	USB_EhciPhyInit(kUSB_ControllerLpcIp3511Hs0, CLK_XTAL_OSC_CLK, &phyConfig);
+
+	/* the following code should run after phy initialization and
+	 * should wait some microseconds to make sure utmi clock valid
+	 */
+	/* enable usb1 host clock */
+	CLOCK_EnableClock(kCLOCK_UsbhsHost);
+	/* Wait until host_needclk de-asserts */
+	while (SYSCTL0->USBCLKSTAT & SYSCTL0_USBCLKSTAT_HOST_NEED_CLKST_MASK) {
+		__ASM("nop");
+	}
+	/* According to reference mannual, device mode setting has to be set by
+	 * access usb host register
+	 */
+	USBHSH->PORTMODE |= USBHSH_PORTMODE_DEV_ENABLE_MASK;
+	/* disable usb1 host clock */
+	CLOCK_DisableClock(kCLOCK_UsbhsHost);
+}
+
+#endif
+
+/**
+ * @brief Initialize the system clock
+ */
 static ALWAYS_INLINE void clock_init(void)
 {
 #ifdef CONFIG_SOC_MIMXRT685S_CM33
 	/* Configure LPOSC clock*/
-	if ((SYSCTL0->PDRUNCFG0 & SYSCTL0_PDRUNCFG0_LPOSC_PD_MASK) != 0) {
-		POWER_DisablePD(kPDRUNCFG_PD_LPOSC);
-	}
-
+	POWER_DisablePD(kPDRUNCFG_PD_LPOSC);
 	/* Configure FFRO clock */
-	if ((SYSCTL0->PDRUNCFG0 & SYSCTL0_PDRUNCFG0_FFRO_PD_MASK) != 0) {
-		POWER_DisablePD(kPDRUNCFG_PD_FFRO);
-		CLOCK_EnableFfroClk(kCLOCK_Ffro48M);
-	}
-	if ((SYSCTL0->PDRUNCFG0 & SYSCTL0_PDRUNCFG0_SFRO_PD_MASK) != 0) {
-		/* Configure SFRO clock */
-		POWER_DisablePD(kPDRUNCFG_PD_SFRO);
-		CLOCK_EnableSfroClk();
-	}
+	POWER_DisablePD(kPDRUNCFG_PD_FFRO);
+	CLOCK_EnableFfroClk(kCLOCK_Ffro48M);
+	/* Configure SFRO clock */
+	POWER_DisablePD(kPDRUNCFG_PD_SFRO);
+	CLOCK_EnableSfroClk();
 
-	if ((SYSCTL0->PDRUNCFG0 & SYSCTL0_PDRUNCFG0_SYSXTAL_PD_MASK) != 0) {
-		/* Configure SYSOSC clock source */
-		POWER_DisablePD(kPDRUNCFG_PD_SYSXTAL);
-		CLOCK_EnableSysOscClk(true, true, BOARD_SYSOSC_SETTLING_US);
-	}
-	CLOCK_SetXtalFreq(BOARD_XTAL_SYS_CLK_HZ);
-
-	/* Let CPU and AHB bus run on FFRO 48MHz for safe switching. */
+	/* Let CPU run on FFRO for safe switching. */
 	CLOCK_AttachClk(kFFRO_to_MAIN_CLK);
-	CLOCK_SetClkDiv(kCLOCK_DivSysCpuAhbClk, 1U);
+
+	/* Configure SYSOSC clock source */
+	POWER_DisablePD(kPDRUNCFG_PD_SYSXTAL);
+	POWER_UpdateOscSettlingTime(CONFIG_SYSOSC_SETTLING_US);
+	CLOCK_EnableSysOscClk(true, true, CONFIG_SYSOSC_SETTLING_US);
+	CLOCK_SetXtalFreq(CONFIG_XTAL_SYS_CLK_HZ);
 
 #ifdef CONFIG_INIT_SYS_PLL
 	/* Configure SysPLL0 clock source */
@@ -139,9 +202,6 @@ static ALWAYS_INLINE void clock_init(void)
 	CLOCK_InitSysPfd(kCLOCK_Pfd2, 24);
 #endif
 
-	/* Set FRGPLLCLKDIV divider to value 12 */
-	CLOCK_SetClkDiv(kCLOCK_DivPllFrgClk, 12U);
-
 #ifdef CONFIG_INIT_AUDIO_PLL
 	/* Configure Audio PLL clock source */
 	CLOCK_InitAudioPll(&g_audioPllConfig);
@@ -149,18 +209,93 @@ static ALWAYS_INLINE void clock_init(void)
 	CLOCK_SetClkDiv(kCLOCK_DivAudioPllClk, 15U);
 #endif
 
+	/* Set SYSCPUAHBCLKDIV divider to value 2 */
+	CLOCK_SetClkDiv(kCLOCK_DivSysCpuAhbClk, 2U);
+
+	/* Set up clock selectors - Attach clocks to the peripheries */
+	CLOCK_AttachClk(kMAIN_PLL_to_MAIN_CLK);
+
+	/* Set up dividers */
+	/* Set PFC0DIV divider to value 2 */
+	CLOCK_SetClkDiv(kCLOCK_DivPfc0Clk, 2U);
+	/* Set FRGPLLCLKDIV divider to value 12 */
+	CLOCK_SetClkDiv(kCLOCK_DivPllFrgClk, 12U);
+
+#if DT_NODE_HAS_COMPAT_STATUS(DT_NODELABEL(flexcomm0), nxp_lpc_usart, okay)
 	CLOCK_AttachClk(kSFRO_to_FLEXCOMM0);
+#endif
+
+#if CONFIG_USB_DC_NXP_LPCIP3511
+	usb_device_clock_init();
+#endif
 
 #if DT_NODE_HAS_COMPAT_STATUS(DT_NODELABEL(flexcomm2), nxp_lpc_i2c, okay)
 	CLOCK_AttachClk(kSFRO_to_FLEXCOMM2);
+#endif
+
+#if DT_NODE_HAS_COMPAT_STATUS(DT_NODELABEL(pmic_i2c), nxp_lpc_i2c, okay)
+	CLOCK_AttachClk(kFFRO_to_FLEXCOMM15);
+#endif
+
+#if DT_NODE_HAS_COMPAT_STATUS(DT_NODELABEL(flexcomm4), nxp_lpc_usart, okay)
+	CLOCK_AttachClk(kSFRO_to_FLEXCOMM4);
 #endif
 
 #if DT_NODE_HAS_COMPAT_STATUS(DT_NODELABEL(flexcomm5), nxp_lpc_spi, okay)
 	CLOCK_AttachClk(kFFRO_to_FLEXCOMM5);
 #endif
 
+#if (DT_NODE_HAS_COMPAT_STATUS(DT_NODELABEL(flexcomm1), nxp_lpc_i2s, okay))
+	/* attach AUDIO PLL clock to FLEXCOMM1 (I2S1) */
+	CLOCK_AttachClk(kAUDIO_PLL_to_FLEXCOMM1);
+#endif
+#if (DT_NODE_HAS_COMPAT_STATUS(DT_NODELABEL(flexcomm3), nxp_lpc_i2s, okay))
+	/* attach AUDIO PLL clock to FLEXCOMM3 (I2S3) */
+	CLOCK_AttachClk(kAUDIO_PLL_to_FLEXCOMM3);
+#endif
+
+#if (DT_NODE_HAS_COMPAT_STATUS(DT_NODELABEL(wwdt0), nxp_lpc_wwdt, okay))
+	CLOCK_AttachClk(kLPOSC_to_WDT0_CLK);
+#else
+	/* Allowed to select none if not being used for watchdog to
+	 * reduce power
+	 */
+	CLOCK_AttachClk(kNONE_to_WDT0_CLK);
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(usdhc0), okay) && CONFIG_IMX_USDHC
+	/* Make sure USDHC ram buffer has been power up*/
+	POWER_DisablePD(kPDRUNCFG_APD_USDHC0_SRAM);
+	POWER_DisablePD(kPDRUNCFG_PPD_USDHC0_SRAM);
+	POWER_DisablePD(kPDRUNCFG_PD_LPOSC);
+	POWER_ApplyPD();
+
+	/* usdhc depend on 32K clock also */
+	CLOCK_AttachClk(kLPOSC_DIV32_to_32KHZWAKE_CLK);
+	CLOCK_AttachClk(kAUX0_PLL_to_SDIO0_CLK);
+	CLOCK_SetClkDiv(kCLOCK_DivSdio0Clk, 1);
+	CLOCK_EnableClock(kCLOCK_Sdio0);
+	RESET_PeripheralReset(kSDIO0_RST_SHIFT_RSTn);
+#endif
+
+	DT_FOREACH_STATUS_OKAY(nxp_lpc_ctimer, CTIMER_CLOCK_SETUP)
+
 #endif /* CONFIG_SOC_MIMXRT685S_CM33 */
 }
+
+#if (DT_NODE_HAS_STATUS(DT_NODELABEL(usdhc0), okay) && CONFIG_IMX_USDHC)
+
+void imxrt_usdhc_pinmux(uint16_t nusdhc, bool init,
+	uint32_t speed, uint32_t strength)
+{
+
+}
+
+void imxrt_usdhc_dat3_pull(bool pullup)
+{
+
+}
+#endif
 
 /**
  *

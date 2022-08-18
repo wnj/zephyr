@@ -6,12 +6,12 @@
  */
 
 #include <soc.h>
-#include <drivers/clock_control.h>
-#include <drivers/clock_control/nrf_clock_control.h>
-#include <drivers/timer/system_timer.h>
-#include <sys_clock.h>
+#include <zephyr/drivers/clock_control.h>
+#include <zephyr/drivers/clock_control/nrf_clock_control.h>
+#include <zephyr/drivers/timer/system_timer.h>
+#include <zephyr/sys_clock.h>
 #include <hal/nrf_timer.h>
-#include <spinlock.h>
+#include <zephyr/spinlock.h>
 
 #define TIMER NRF_TIMER0
 
@@ -71,7 +71,7 @@ static void prevent_false_prev_evt(void)
 	uint32_t prev_val;
 
 	/* First take care of a risk of an event coming from CC being set to
-	 * next tick. Reconfigure CC to future (now tick is the furtherest
+	 * next tick. Reconfigure CC to future (now tick is the furthest
 	 * future). If CC was set to next tick we need to wait for up to 0.5us
 	 * (half of 1M tick) and clean potential event. After that time there
 	 * is no risk of unwanted event.
@@ -157,35 +157,10 @@ void timer0_nrf_isr(void *arg)
 		set_absolute_ticks(last_count + CYC_PER_TICK);
 	}
 
-	z_clock_announce(IS_ENABLED(CONFIG_TICKLESS_KERNEL) ? dticks : (dticks > 0));
+	sys_clock_announce(IS_ENABLED(CONFIG_TICKLESS_KERNEL) ? dticks : (dticks > 0));
 }
 
-int z_clock_driver_init(const struct device *device)
-{
-	ARG_UNUSED(device);
-
-	/* FIXME switch to 1 MHz once this is fixed in QEMU */
-	nrf_timer_frequency_set(TIMER, NRF_TIMER_FREQ_2MHz);
-	nrf_timer_bit_width_set(TIMER, NRF_TIMER_BIT_WIDTH_32);
-
-	IRQ_CONNECT(TIMER0_IRQn, 1, timer0_nrf_isr, 0, 0);
-	irq_enable(TIMER0_IRQn);
-
-	nrf_timer_task_trigger(TIMER, NRF_TIMER_TASK_CLEAR);
-	nrf_timer_task_trigger(TIMER, NRF_TIMER_TASK_START);
-
-	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
-		set_comparator(counter() + CYC_PER_TICK);
-	}
-
-	event_clear();
-	NVIC_ClearPendingIRQ(TIMER0_IRQn);
-	int_enable();
-
-	return 0;
-}
-
-void z_clock_set_timeout(int32_t ticks, bool idle)
+void sys_clock_set_timeout(int32_t ticks, bool idle)
 {
 	ARG_UNUSED(idle);
 	uint32_t cyc;
@@ -195,7 +170,7 @@ void z_clock_set_timeout(int32_t ticks, bool idle)
 	}
 
 	ticks = (ticks == K_TICKS_FOREVER) ? MAX_TICKS : ticks;
-	ticks = MAX(MIN(ticks - 1, (int32_t)MAX_TICKS), 0);
+	ticks = CLAMP(ticks - 1, 0, (int32_t)MAX_TICKS);
 
 	uint32_t unannounced = counter_sub(counter(), last_count);
 
@@ -234,7 +209,7 @@ void z_clock_set_timeout(int32_t ticks, bool idle)
 	NVIC_ClearPendingIRQ(TIMER0_IRQn);
 }
 
-uint32_t z_clock_elapsed(void)
+uint32_t sys_clock_elapsed(void)
 {
 	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
 		return 0;
@@ -247,7 +222,7 @@ uint32_t z_clock_elapsed(void)
 	return ret;
 }
 
-uint32_t z_timer_cycle_get_32(void)
+uint32_t sys_clock_cycle_get_32(void)
 {
 	k_spinlock_key_t key = k_spin_lock(&lock);
 	uint32_t ret = counter_sub(counter(), last_count) + last_count;
@@ -255,3 +230,31 @@ uint32_t z_timer_cycle_get_32(void)
 	k_spin_unlock(&lock, key);
 	return ret;
 }
+
+static int sys_clock_driver_init(const struct device *dev)
+{
+	ARG_UNUSED(dev);
+
+	/* FIXME switch to 1 MHz once this is fixed in QEMU */
+	nrf_timer_frequency_set(TIMER, NRF_TIMER_FREQ_2MHz);
+	nrf_timer_bit_width_set(TIMER, NRF_TIMER_BIT_WIDTH_32);
+
+	IRQ_CONNECT(TIMER0_IRQn, 1, timer0_nrf_isr, 0, 0);
+	irq_enable(TIMER0_IRQn);
+
+	nrf_timer_task_trigger(TIMER, NRF_TIMER_TASK_CLEAR);
+	nrf_timer_task_trigger(TIMER, NRF_TIMER_TASK_START);
+
+	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
+		set_comparator(counter() + CYC_PER_TICK);
+	}
+
+	event_clear();
+	NVIC_ClearPendingIRQ(TIMER0_IRQn);
+	int_enable();
+
+	return 0;
+}
+
+SYS_INIT(sys_clock_driver_init, PRE_KERNEL_2,
+	 CONFIG_SYSTEM_CLOCK_INIT_PRIORITY);

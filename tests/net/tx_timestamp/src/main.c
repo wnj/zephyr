@@ -8,7 +8,7 @@
 
 #define NET_LOG_LEVEL CONFIG_NET_L2_ETHERNET_LOG_LEVEL
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_test, NET_LOG_LEVEL);
 
 #include <zephyr/types.h>
@@ -16,18 +16,18 @@ LOG_MODULE_REGISTER(net_test, NET_LOG_LEVEL);
 #include <stddef.h>
 #include <string.h>
 #include <errno.h>
-#include <sys/printk.h>
-#include <linker/sections.h>
-#include <random/rand32.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/linker/sections.h>
+#include <zephyr/random/rand32.h>
 
-#include <ztest.h>
+#include <zephyr/ztest.h>
 
-#include <net/buf.h>
-#include <net/net_ip.h>
-#include <net/net_pkt.h>
-#include <net/ethernet.h>
-#include <net/dummy.h>
-#include <net/net_l2.h>
+#include <zephyr/net/buf.h>
+#include <zephyr/net/net_ip.h>
+#include <zephyr/net/net_pkt.h>
+#include <zephyr/net/ethernet.h>
+#include <zephyr/net/dummy.h>
+#include <zephyr/net/net_l2.h>
 
 #include "ipv6.h"
 
@@ -153,11 +153,11 @@ static int eth_init(const struct device *dev)
 	return 0;
 }
 
-ETH_NET_DEVICE_INIT(eth_test, "eth_test", eth_init, device_pm_control_nop,
+ETH_NET_DEVICE_INIT(eth_test, "eth_test", eth_init, NULL,
 		    &eth_context, NULL, CONFIG_ETH_INIT_PRIORITY, &api_funcs,
 		    NET_ETH_MTU);
 
-ETH_NET_DEVICE_INIT(eth_test2, "eth_test2", eth_init, device_pm_control_nop,
+ETH_NET_DEVICE_INIT(eth_test2, "eth_test2", eth_init, NULL,
 		    &eth_context2, NULL, CONFIG_ETH_INIT_PRIORITY, &api_funcs,
 		    NET_ETH_MTU);
 
@@ -364,7 +364,7 @@ static void test_address_setup(void)
 		zassert_not_null(ifaddr, "addr1\n");
 	}
 
-	/* For testing purposes we need to set the adddresses preferred */
+	/* For testing purposes we need to set the addresses preferred */
 	ifaddr->addr_state = NET_ADDR_PREFERRED;
 
 	ifaddr = net_if_ipv6_addr_add(iface1, &ll_addr,
@@ -435,7 +435,6 @@ static void send_some_data(struct net_if *iface)
 		.sin6_family = AF_INET6,
 		.sin6_port = 0,
 	};
-	bool timestamp = true;
 	int ret;
 
 	ret = net_context_get(AF_INET6, SOCK_DGRAM, IPPROTO_UDP,
@@ -451,9 +450,6 @@ static void send_some_data(struct net_if *iface)
 
 	ret = add_neighbor(iface, &dst_addr);
 	zassert_true(ret, "Cannot add neighbor\n");
-
-	net_context_set_option(udp_v6_ctx, NET_OPT_TIMESTAMP,
-			       &timestamp, sizeof(timestamp));
 
 	ret = net_context_sendto(udp_v6_ctx, test_data, strlen(test_data),
 				 (struct sockaddr *)&dst_addr6,

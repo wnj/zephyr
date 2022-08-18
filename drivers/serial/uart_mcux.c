@@ -8,18 +8,24 @@
 #define DT_DRV_COMPAT nxp_kinetis_uart
 
 #include <errno.h>
-#include <device.h>
-#include <drivers/uart.h>
-#include <drivers/clock_control.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/uart.h>
+#include <zephyr/drivers/clock_control.h>
 #include <fsl_uart.h>
 #include <soc.h>
+#ifdef CONFIG_PINCTRL
+#include <zephyr/drivers/pinctrl.h>
+#endif
 
 struct uart_mcux_config {
 	UART_Type *base;
-	char *clock_name;
+	const struct device *clock_dev;
 	clock_control_subsys_t clock_subsys;
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	void (*irq_config_func)(const struct device *dev);
+#endif
+#ifdef CONFIG_PINCTRL
+	const struct pinctrl_dev_config *pincfg;
 #endif
 };
 
@@ -37,16 +43,14 @@ static int uart_mcux_configure(const struct device *dev,
 	const struct uart_mcux_config *config = dev->config;
 	struct uart_mcux_data *data = dev->data;
 	uart_config_t uart_config;
-	const struct device *clock_dev;
 	uint32_t clock_freq;
 	status_t retval;
 
-	clock_dev = device_get_binding(config->clock_name);
-	if (clock_dev == NULL) {
-		return -EINVAL;
+	if (!device_is_ready(config->clock_dev)) {
+		return -ENODEV;
 	}
 
-	if (clock_control_get_rate(clock_dev, config->clock_subsys,
+	if (clock_control_get_rate(config->clock_dev, config->clock_subsys,
 				   &clock_freq)) {
 		return -EINVAL;
 	}
@@ -108,6 +112,7 @@ FSL_FEATURE_UART_HAS_STOP_BIT_CONFIG_SUPPORT
 	return 0;
 }
 
+#ifdef CONFIG_UART_USE_RUNTIME_CONFIGURE
 static int uart_mcux_config_get(const struct device *dev,
 				struct uart_config *cfg)
 {
@@ -117,6 +122,7 @@ static int uart_mcux_config_get(const struct device *dev,
 
 	return 0;
 }
+#endif /* CONFIG_UART_USE_RUNTIME_CONFIGURE */
 
 static int uart_mcux_poll_in(const struct device *dev, unsigned char *c)
 {
@@ -257,7 +263,7 @@ static int uart_mcux_irq_rx_full(const struct device *dev)
 	return (flags & kUART_RxDataRegFullFlag) != 0U;
 }
 
-static int uart_mcux_irq_rx_ready(const struct device *dev)
+static int uart_mcux_irq_rx_pending(const struct device *dev)
 {
 	const struct uart_mcux_config *config = dev->config;
 	uint32_t mask = kUART_RxDataRegFullInterruptEnable;
@@ -288,7 +294,7 @@ static void uart_mcux_irq_err_disable(const struct device *dev)
 
 static int uart_mcux_irq_is_pending(const struct device *dev)
 {
-	return uart_mcux_irq_tx_ready(dev) || uart_mcux_irq_rx_ready(dev);
+	return uart_mcux_irq_tx_ready(dev) || uart_mcux_irq_rx_pending(dev);
 }
 
 static int uart_mcux_irq_update(const struct device *dev)
@@ -318,7 +324,7 @@ static void uart_mcux_isr(const struct device *dev)
 
 static int uart_mcux_init(const struct device *dev)
 {
-#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+#if defined(CONFIG_PINCTRL) || defined(CONFIG_UART_INTERRUPT_DRIVEN)
 	const struct uart_mcux_config *config = dev->config;
 #endif
 	struct uart_mcux_data *data = dev->data;
@@ -328,6 +334,13 @@ static int uart_mcux_init(const struct device *dev)
 	if (err != 0) {
 		return err;
 	}
+
+#ifdef CONFIG_PINCTRL
+	err = pinctrl_apply_state(config->pincfg, PINCTRL_STATE_DEFAULT);
+	if (err != 0) {
+		return err;
+	}
+#endif
 
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	config->irq_config_func(dev);
@@ -340,8 +353,10 @@ static const struct uart_driver_api uart_mcux_driver_api = {
 	.poll_in = uart_mcux_poll_in,
 	.poll_out = uart_mcux_poll_out,
 	.err_check = uart_mcux_err_check,
+#ifdef CONFIG_UART_USE_RUNTIME_CONFIGURE
 	.configure = uart_mcux_configure,
 	.config_get = uart_mcux_config_get,
+#endif
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	.fifo_fill = uart_mcux_fifo_fill,
 	.fifo_read = uart_mcux_fifo_read,
@@ -351,7 +366,7 @@ static const struct uart_driver_api uart_mcux_driver_api = {
 	.irq_tx_ready = uart_mcux_irq_tx_ready,
 	.irq_rx_enable = uart_mcux_irq_rx_enable,
 	.irq_rx_disable = uart_mcux_irq_rx_disable,
-	.irq_rx_ready = uart_mcux_irq_rx_ready,
+	.irq_rx_ready = uart_mcux_irq_rx_full,
 	.irq_err_enable = uart_mcux_irq_err_enable,
 	.irq_err_disable = uart_mcux_irq_err_disable,
 	.irq_is_pending = uart_mcux_irq_is_pending,
@@ -360,11 +375,20 @@ static const struct uart_driver_api uart_mcux_driver_api = {
 #endif
 };
 
+#ifdef CONFIG_PINCTRL
+#define PINCTRL_INIT(n) .pincfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),
+#define PINCTRL_DEFINE(n) PINCTRL_DT_INST_DEFINE(n);
+#else
+#define PINCTRL_DEFINE(n)
+#define PINCTRL_INIT(n)
+#endif
+
 #define UART_MCUX_DECLARE_CFG(n, IRQ_FUNC_INIT)				\
 static const struct uart_mcux_config uart_mcux_##n##_config = {		\
 	.base = (UART_Type *)DT_INST_REG_ADDR(n),			\
-	.clock_name = DT_INST_CLOCKS_LABEL(n),				\
+	.clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),		\
 	.clock_subsys = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, name),\
+	PINCTRL_INIT(n)							\
 	IRQ_FUNC_INIT							\
 }
 
@@ -374,13 +398,13 @@ static const struct uart_mcux_config uart_mcux_##n##_config = {		\
 	{								\
 		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, status, irq),	\
 			    DT_INST_IRQ_BY_NAME(n, status, priority),	\
-			    uart_mcux_isr, DEVICE_GET(uart_##n), 0);	\
+			    uart_mcux_isr, DEVICE_DT_INST_GET(n), 0);	\
 									\
 		irq_enable(DT_INST_IRQ_BY_NAME(n, status, irq));	\
 									\
 		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, error, irq),		\
 			    DT_INST_IRQ_BY_NAME(n, error, priority),	\
-			    uart_mcux_isr, DEVICE_GET(uart_##n), 0);	\
+			    uart_mcux_isr, DEVICE_DT_INST_GET(n), 0);	\
 									\
 		irq_enable(DT_INST_IRQ_BY_NAME(n, error, irq));		\
 	}
@@ -396,6 +420,7 @@ static const struct uart_mcux_config uart_mcux_##n##_config = {		\
 #endif
 
 #define UART_MCUX_INIT(n)						\
+	PINCTRL_DEFINE(n)						\
 									\
 	static struct uart_mcux_data uart_mcux_##n##_data = {		\
 		.uart_cfg = {						\
@@ -410,12 +435,13 @@ static const struct uart_mcux_config uart_mcux_##n##_config = {		\
 									\
 	static const struct uart_mcux_config uart_mcux_##n##_config;	\
 									\
-	DEVICE_AND_API_INIT(uart_##n, DT_INST_LABEL(n),			\
+	DEVICE_DT_INST_DEFINE(n,					\
 			    &uart_mcux_init,				\
+			    NULL,					\
 			    &uart_mcux_##n##_data,			\
 			    &uart_mcux_##n##_config,			\
 			    PRE_KERNEL_1,				\
-			    CONFIG_KERNEL_INIT_PRIORITY_DEVICE,		\
+			    CONFIG_SERIAL_INIT_PRIORITY,		\
 			    &uart_mcux_driver_api);			\
 									\
 	UART_MCUX_CONFIG_FUNC(n)					\

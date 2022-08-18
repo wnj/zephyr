@@ -9,19 +9,25 @@
  *
  */
 
-#include <zephyr.h>
-#include <ztest.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/ztest.h>
 #include <errno.h>
-#include <settings/settings.h>
-#include <logging/log.h>
+#include <zephyr/settings/settings.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(settings_basic_test);
 
 #if defined(CONFIG_SETTINGS_FCB) || defined(CONFIG_SETTINGS_NVS)
-#include <storage/flash_map.h>
+#include <zephyr/storage/flash_map.h>
+#if DT_HAS_CHOSEN(zephyr_settings_partition)
+#define TEST_FLASH_AREA chosen_partition
+#else
+#define TEST_FLASH_AREA storage
+#endif
+#define TEST_FLASH_AREA_ID FLASH_AREA_ID(TEST_FLASH_AREA)
 #endif
 #if IS_ENABLED(CONFIG_SETTINGS_FS)
-#include <fs/fs.h>
-#include <fs/littlefs.h>
+#include <zephyr/fs/fs.h>
+#include <zephyr/fs/littlefs.h>
 #endif
 
 /* The standard test expects a cleared flash area.  Make sure it has
@@ -29,26 +35,27 @@ LOG_MODULE_REGISTER(settings_basic_test);
  */
 static void test_clear_settings(void)
 {
-#if IS_ENABLED(CONFIG_SETTINGS_FCB) || IS_ENABLED(CONFIG_SETTINGS_NVS)
+#if defined(TEST_FLASH_AREA_ID)
 	const struct flash_area *fap;
-	int rc = flash_area_open(FLASH_AREA_ID(storage), &fap);
+	int rc;
+
+	rc = flash_area_open(TEST_FLASH_AREA_ID, &fap);
 
 	if (rc == 0) {
 		rc = flash_area_erase(fap, 0, fap->fa_size);
 		flash_area_close(fap);
 	}
 	zassert_true(rc == 0, "clear settings failed");
-#endif
-#if IS_ENABLED(CONFIG_SETTINGS_FS)
+#elif IS_ENABLED(CONFIG_SETTINGS_FS)
 	FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(cstorage);
 
 	/* mounting info */
 	static struct fs_mount_t littlefs_mnt = {
-	.type = FS_LITTLEFS,
-	.fs_data = &cstorage,
-	.storage_dev = (void *)FLASH_AREA_ID(storage),
-	.mnt_point = "/ff"
-};
+		.type = FS_LITTLEFS,
+		.fs_data = &cstorage,
+		.storage_dev = (void *)FLASH_AREA_ID(storage),
+		.mnt_point = "/ff"
+	};
 
 	int rc;
 
@@ -58,6 +65,8 @@ static void test_clear_settings(void)
 	rc = fs_unlink(CONFIG_SETTINGS_FS_FILE);
 	zassert_true(rc == 0 || rc == -ENOENT,
 		     "can't delete config file%d\n", rc);
+#else
+#error "Settings backend not selected"
 #endif
 }
 
@@ -335,7 +344,7 @@ static void test_register_and_loading(void)
 	err = (!data.en1) && (data.en2) && (!data.en3);
 	zassert_true(err, "wrong data enable found");
 
-	/* clean up by deregisterring settings_handler */
+	/* clean up by deregistering settings_handler */
 	rc = settings_deregister(&val1_settings);
 	zassert_true(rc, "deregistering val1_settings failed");
 
@@ -560,7 +569,7 @@ static void test_direct_loading_filter(void)
 	strcpy(buffer, prefix);
 	strcat(buffer, "/to_delete");
 	settings_save_one(buffer, "1", 2);
-	settings_delete(buffer);
+	(void) settings_delete(buffer);
 
 	/* Saving all the data */
 	for (ldata = data_duplicates; ldata->n; ++ldata) {
@@ -606,6 +615,7 @@ static void test_direct_loading_filter(void)
 	}
 }
 
+extern void test_setting_storage_get(void);
 
 void test_main(void)
 {
@@ -614,7 +624,8 @@ void test_main(void)
 			 ztest_unit_test(test_support_rtn),
 			 ztest_unit_test(test_register_and_loading),
 			 ztest_unit_test(test_direct_loading),
-			 ztest_unit_test(test_direct_loading_filter)
+			 ztest_unit_test(test_direct_loading_filter),
+			 ztest_unit_test(test_setting_storage_get)
 			);
 
 	ztest_run_test_suite(settings_test_suite);

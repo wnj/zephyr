@@ -5,11 +5,17 @@ description: STM32 I2C V1 controller
 
 compatible: "st,stm32-i2c-v1"
 
-include: i2c-controller.yaml
+include: [i2c-controller.yaml, pinctrl-device.yaml]
 
 properties:
     reg:
       required: true
 
     interrupts:
+      required: true
+
+    pinctrl-0:
+      required: true
+
+    pinctrl-names:
       required: true

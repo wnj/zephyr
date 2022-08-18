@@ -14,10 +14,10 @@
  * provide a random number generator.
  */
 
-#include <random/rand32.h>
-#include <drivers/timer/system_timer.h>
-#include <kernel.h>
-#include <sys/atomic.h>
+#include <zephyr/random/rand32.h>
+#include <zephyr/drivers/timer/system_timer.h>
+#include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 #include <string.h>
 
 #if defined(__GNUC__)
@@ -28,10 +28,9 @@
  */
 static atomic_val_t _rand32_counter;
 
-#define _RAND32_INC 1000000013U
+#define _RAND32_INC 1000000003U
 
 /**
- *
  * @brief Get a 32 bit random number
  *
  * The non-random number generator returns values that are based off the
@@ -40,14 +39,12 @@ static atomic_val_t _rand32_counter;
  *
  * @return a 32-bit number
  */
-
 uint32_t z_impl_sys_rand32_get(void)
 {
 	return k_cycle_get_32() + atomic_add(&_rand32_counter, _RAND32_INC);
 }
 
 /**
- *
  * @brief Fill destination buffer with random numbers
  *
  * The non-random number generator returns values that are based off the
@@ -56,26 +53,19 @@ uint32_t z_impl_sys_rand32_get(void)
  *
  * @param dst destination buffer to fill
  * @param outlen size of destination buffer to fill
- *
- * @return N/A
  */
-
 void z_impl_sys_rand_get(void *dst, size_t outlen)
 {
-	uint32_t len = 0;
-	uint32_t blocksize = 4;
+	uint8_t *udst = dst;
+	uint32_t blocksize;
 	uint32_t ret;
-	uint32_t *udst = (uint32_t *)dst;
 
-	while (len < outlen) {
+	while (outlen) {
 		ret = sys_rand32_get();
-		if ((outlen-len) < sizeof(ret)) {
-			blocksize = len;
-			(void)memcpy(udst, &ret, blocksize);
-		} else {
-			(*udst++) = ret;
-		}
-		len += blocksize;
+		blocksize = MIN(outlen, sizeof(ret));
+		(void)memcpy((void *)udst, &ret, blocksize);
+		udst += blocksize;
+		outlen -= blocksize;
 	}
 }
 #endif /* __GNUC__ */

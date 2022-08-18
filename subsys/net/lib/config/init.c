@@ -6,24 +6,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_config, CONFIG_NET_CONFIG_LOG_LEVEL);
 
-#include <zephyr.h>
-#include <init.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/init.h>
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
 
-#include <logging/log_backend.h>
-#include <net/net_core.h>
-#include <net/net_ip.h>
-#include <net/net_if.h>
-#include <net/dhcpv4.h>
-#include <net/net_mgmt.h>
-#include <net/dns_resolve.h>
+#include <zephyr/logging/log_backend.h>
+#include <zephyr/net/net_core.h>
+#include <zephyr/net/net_ip.h>
+#include <zephyr/net/net_if.h>
+#include <zephyr/net/dhcpv4.h>
+#include <zephyr/net/net_mgmt.h>
+#include <zephyr/net/dns_resolve.h>
 
-#include <net/net_config.h>
+#include <zephyr/net/net_config.h>
 
 #include "ieee802154_settings.h"
 #include "bt_settings.h"
@@ -32,7 +32,7 @@ extern const struct log_backend *log_backend_net_get(void);
 extern int net_init_clock_via_sntp(void);
 
 static K_SEM_DEFINE(waiter, 0, 1);
-static struct k_sem counter;
+static K_SEM_DEFINE(counter, 0, UINT_MAX);
 static atomic_t services_flags;
 
 #if defined(CONFIG_NET_NATIVE)
@@ -76,19 +76,19 @@ static void ipv4_addr_add_handler(struct net_mgmt_event_callback *cb,
 
 #if CONFIG_NET_CONFIG_LOG_LEVEL >= LOG_LEVEL_INF
 		NET_INFO("IPv4 address: %s",
-			 log_strdup(net_addr_ntop(AF_INET,
-						  &if_addr->address.in_addr,
-						  hr_addr, sizeof(hr_addr))));
+			 net_addr_ntop(AF_INET,
+					&if_addr->address.in_addr,
+					hr_addr, sizeof(hr_addr)));
 		NET_INFO("Lease time: %u seconds",
 			 iface->config.dhcpv4.lease_time);
 		NET_INFO("Subnet: %s",
-			 log_strdup(net_addr_ntop(AF_INET,
+			 net_addr_ntop(AF_INET,
 				       &iface->config.ip.ipv4->netmask,
-				       hr_addr, sizeof(hr_addr))));
+				       hr_addr, sizeof(hr_addr)));
 		NET_INFO("Router: %s",
-			 log_strdup(net_addr_ntop(AF_INET,
-						  &iface->config.ip.ipv4->gw,
-						  hr_addr, sizeof(hr_addr))));
+			 net_addr_ntop(AF_INET,
+					&iface->config.ip.ipv4->gw,
+					hr_addr, sizeof(hr_addr)));
 #endif
 		break;
 	}
@@ -153,8 +153,7 @@ static void setup_ipv4(struct net_if *iface)
 
 #if CONFIG_NET_CONFIG_LOG_LEVEL >= LOG_LEVEL_INF
 	NET_INFO("IPv4 address: %s",
-		 log_strdup(net_addr_ntop(AF_INET, &addr, hr_addr,
-					  sizeof(hr_addr))));
+		 net_addr_ntop(AF_INET, &addr, hr_addr, sizeof(hr_addr)));
 #endif
 
 	if (sizeof(CONFIG_NET_CONFIG_MY_IPV4_NETMASK) > 1) {
@@ -232,8 +231,7 @@ static void ipv6_event_handler(struct net_mgmt_event_callback *cb,
 
 #if CONFIG_NET_CONFIG_LOG_LEVEL >= LOG_LEVEL_INF
 		NET_INFO("IPv6 address: %s",
-			 log_strdup(net_addr_ntop(AF_INET6, &laddr, hr_addr,
-						  NET_IPV6_ADDR_LEN)));
+			 net_addr_ntop(AF_INET6, &laddr, hr_addr, NET_IPV6_ADDR_LEN));
 #endif
 
 		services_notify_ready(NET_CONFIG_NEED_IPV6);
@@ -344,7 +342,7 @@ int net_config_init_by_iface(struct net_if *iface, const char *app_info,
 	int count;
 
 	if (app_info) {
-		NET_INFO("%s", log_strdup(app_info));
+		NET_INFO("%s", app_info);
 	}
 
 	if (!iface) {
@@ -356,12 +354,12 @@ int net_config_init_by_iface(struct net_if *iface, const char *app_info,
 	} else if (timeout == 0) {
 		count = 0;
 	} else {
-		count = timeout / 1000 + 1;
+		count = LOOP_DIVIDER;
 	}
 
 	/* First make sure that network interface is up */
 	if (check_interface(iface) == false) {
-		k_sem_init(&counter, 1, UINT_MAX);
+		k_sem_init(&counter, 1, K_SEM_MAX_LIMIT);
 
 		while (count-- > 0) {
 			if (!k_sem_count_get(&counter)) {
@@ -375,24 +373,18 @@ int net_config_init_by_iface(struct net_if *iface, const char *app_info,
 			}
 		}
 
-		/* If the above while() loop timeouted, reset the count so that
-		 * the while() loop below will not wait more.
-		 */
-		if (timeout > 0 && count < 0) {
-			count = 0;
-		}
-
 #if defined(CONFIG_NET_NATIVE)
 		net_mgmt_del_event_callback(&mgmt_iface_cb);
 #endif
-	}
 
-	if (count == 0) {
 		/* Network interface did not come up. We will not try
 		 * to setup things in that case.
 		 */
-		NET_ERR("Timeout while waiting network %s", "interface");
-		return -ENETDOWN;
+		if (timeout > 0 && count < 0) {
+			NET_ERR("Timeout while waiting network %s",
+				"interface");
+			return -ENETDOWN;
+		}
 	}
 
 	setup_ipv4(iface);
@@ -420,6 +412,17 @@ int net_config_init(const char *app_info, uint32_t flags,
 	return net_config_init_by_iface(NULL, app_info, flags, timeout);
 }
 
+static void iface_find_cb(struct net_if *iface, void *user_data)
+{
+	struct net_if **iface_to_use = user_data;
+
+	if (*iface_to_use == NULL &&
+	    !net_if_flag_is_set(iface, NET_IF_NO_AUTO_START)) {
+		*iface_to_use = iface;
+		return;
+	}
+}
+
 int net_config_init_app(const struct device *dev, const char *app_info)
 {
 	struct net_if *iface = NULL;
@@ -434,13 +437,13 @@ int net_config_init_app(const struct device *dev, const char *app_info)
 		}
 	}
 
-#if defined(CONFIG_NET_IPV6)
-	/* IEEE 802.15.4 is only usable if IPv6 is enabled */
 	ret = z_net_config_ieee802154_setup();
 	if (ret < 0) {
 		NET_ERR("Cannot setup IEEE 802.15.4 interface (%d)", ret);
 	}
 
+#if defined(CONFIG_NET_IPV6)
+	/* Bluetooth is only usable if IPv6 is enabled */
 	ret = z_net_config_bt_setup();
 	if (ret < 0) {
 		NET_ERR("Cannot setup Bluetooth interface (%d)", ret);
@@ -459,6 +462,11 @@ int net_config_init_app(const struct device *dev, const char *app_info)
 		flags |= NET_CONFIG_NEED_IPV4;
 	}
 
+	/* Only try to use a network interface that is auto started */
+	if (iface == NULL) {
+		net_if_foreach(iface_find_cb, &iface);
+	}
+
 	/* Initialize the application automatically if needed */
 	ret = net_config_init_by_iface(iface, app_info, flags,
 				CONFIG_NET_CONFIG_INIT_TIMEOUT * MSEC_PER_SEC);
@@ -473,10 +481,15 @@ int net_config_init_app(const struct device *dev, const char *app_info)
 	/* This is activated late as it requires the network stack to be up
 	 * and running before syslog messages can be sent to network.
 	 */
-	if (IS_ENABLED(CONFIG_LOG_BACKEND_NET)) {
+	if (IS_ENABLED(CONFIG_LOG_BACKEND_NET) &&
+	    IS_ENABLED(CONFIG_LOG_BACKEND_NET_AUTOSTART)) {
 		const struct log_backend *backend = log_backend_net_get();
 
 		if (!log_backend_is_active(backend)) {
+			if (backend->api->init != NULL) {
+				backend->api->init(backend);
+			}
+
 			log_backend_activate(backend, NULL);
 		}
 	}

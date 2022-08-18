@@ -5,10 +5,10 @@
  */
 
 #include <errno.h>
-#include <zephyr.h>
-#include <sys/printk.h>
-#include <device.h>
-#include <drivers/spi.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/spi.h>
 
 /**
  * @file Sample app using the Fujitsu MB85RS64V FRAM through SPI.
@@ -145,9 +145,9 @@ void main(void)
 
 	printk("fujitsu FRAM example application\n");
 
-	spi = device_get_binding(DT_LABEL(DT_ALIAS(spi_1)));
-	if (!spi) {
-		printk("Could not find SPI driver\n");
+	spi = DEVICE_DT_GET(DT_ALIAS(spi_1));
+	if (!device_is_ready(spi)) {
+		printk("SPI device %s is not ready\n", spi->name);
 		return;
 	}
 
@@ -165,7 +165,7 @@ void main(void)
 	data[0] = 0xAE;
 	err = write_bytes(spi, &spi_cfg, 0x00, data, 1);
 	if (err) {
-		printk("Error writing to FRAM! errro code (%d)\n", err);
+		printk("Error writing to FRAM! error code (%d)\n", err);
 		return;
 	} else {
 		printk("Wrote 0xAE to address 0x00.\n");

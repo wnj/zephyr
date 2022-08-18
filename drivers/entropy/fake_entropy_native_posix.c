@@ -13,13 +13,13 @@
 
 #define DT_DRV_COMPAT zephyr_native_posix_rng
 
-#include "device.h"
-#include <drivers/entropy.h>
-#include "init.h"
-#include <sys/util.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/entropy.h>
+#include <zephyr/init.h>
+#include <zephyr/sys/util.h>
 #include <stdlib.h>
 #include <string.h>
-#include <arch/posix/posix_trace.h>
+#include <zephyr/arch/posix/posix_trace.h>
 #include "soc.h"
 #include "cmdline.h" /* native_posix command line options header */
 
@@ -75,9 +75,10 @@ static const struct entropy_driver_api entropy_native_posix_api_funcs = {
 	.get_entropy_isr = entropy_native_posix_get_entropy_isr
 };
 
-DEVICE_AND_API_INIT(entropy_native_posix, DT_INST_LABEL(0),
-		    entropy_native_posix_init, NULL, NULL,
-		    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+DEVICE_DT_INST_DEFINE(0,
+		    entropy_native_posix_init, NULL,
+		    NULL, NULL,
+		    PRE_KERNEL_1, CONFIG_ENTROPY_INIT_PRIORITY,
 		    &entropy_native_posix_api_funcs);
 
 static void add_fake_entropy_option(void)

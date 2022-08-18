@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <ztest.h>
-#include <sys/util.h>
+#include <zephyr/ztest.h>
+#include <zephyr/sys/util.h>
 #include <string.h>
 
 /**
@@ -162,28 +162,17 @@ skipped:
 	#undef test_IF_ENABLED_FLAG_B
 }
 
-void test_UTIL_LISTIFY(void)
+void test_LISTIFY(void)
 {
-	int i = 0;
+	int ab0 = 1;
+	int ab1 = 1;
+#define A_PTR(x, name0, name1) &UTIL_CAT(UTIL_CAT(name0, name1), x)
 
-#define INC(x, _)		\
-	do {			\
-		i += x;		\
-	} while (0);
+	int *a[] = { LISTIFY(2, A_PTR, (,), a, b) };
 
-#define DEFINE(x, y) int a##x = x * y;
-#define MARK_UNUSED(x, _) ARG_UNUSED(a##x);
-
-	UTIL_LISTIFY(4, DEFINE, 2)
-	UTIL_LISTIFY(4, MARK_UNUSED, _)
-
-	UTIL_LISTIFY(4, INC, _)
-
-	zassert_equal(i, 0 + 1 + 2 + 3, NULL);
-	zassert_equal(a0, 0, NULL);
-	zassert_equal(a1, 2, NULL);
-	zassert_equal(a2, 4, NULL);
-	zassert_equal(a3, 6, NULL);
+	zassert_equal(ARRAY_SIZE(a), 2, NULL);
+	zassert_equal(a[0], &ab0, NULL);
+	zassert_equal(a[1], &ab1, NULL);
 }
 
 void test_MACRO_MAP_CAT(void)
@@ -203,10 +192,10 @@ static int inc_func(void)
 	return a++;
 }
 
-/* Test checks if @ref Z_MAX and @ref Z_MIN return correct result and perform
- * single evaluation of input arguments.
+/* Test checks if @ref Z_MAX, @ref Z_MIN and @ref Z_CLAMP return correct result
+ * and perform single evaluation of input arguments.
  */
-static void test_z_max_z_min(void)
+static void test_z_max_z_min_z_clamp(void)
 {
 	zassert_equal(Z_MAX(inc_func(), 0), 1, "Unexpected macro result");
 	/* Z_MAX should have call inc_func only once */
@@ -215,6 +204,49 @@ static void test_z_max_z_min(void)
 	zassert_equal(Z_MIN(inc_func(), 2), 2, "Unexpected macro result");
 	/* Z_MIN should have call inc_func only once */
 	zassert_equal(inc_func(), 4, "Unexpected return value");
+
+	zassert_equal(Z_CLAMP(inc_func(), 1, 3), 3, "Unexpected macro result");
+	/* Z_CLAMP should have call inc_func only once */
+	zassert_equal(inc_func(), 6, "Unexpected return value");
+
+	zassert_equal(Z_CLAMP(inc_func(), 10, 15), 10,
+		      "Unexpected macro result");
+	/* Z_CLAMP should have call inc_func only once */
+	zassert_equal(inc_func(), 8, "Unexpected return value");
+}
+
+static void test_CLAMP(void)
+{
+	zassert_equal(CLAMP(5, 3, 7), 5, "Unexpected clamp result");
+	zassert_equal(CLAMP(3, 3, 7), 3, "Unexpected clamp result");
+	zassert_equal(CLAMP(7, 3, 7), 7, "Unexpected clamp result");
+	zassert_equal(CLAMP(1, 3, 7), 3, "Unexpected clamp result");
+	zassert_equal(CLAMP(8, 3, 7), 7, "Unexpected clamp result");
+
+	zassert_equal(CLAMP(-5, -7, -3), -5, "Unexpected clamp result");
+	zassert_equal(CLAMP(-9, -7, -3), -7, "Unexpected clamp result");
+	zassert_equal(CLAMP(1, -7, -3), -3, "Unexpected clamp result");
+
+	zassert_equal(CLAMP(0xffffffffaULL, 0xffffffff0ULL, 0xfffffffffULL),
+		      0xffffffffaULL, "Unexpected clamp result");
+}
+
+static void test_IN_RANGE(void)
+{
+	zassert_true(IN_RANGE(0, 0, 0), "Unexpected IN_RANGE result");
+	zassert_true(IN_RANGE(1, 0, 1), "Unexpected IN_RANGE result");
+	zassert_true(IN_RANGE(1, 0, 2), "Unexpected IN_RANGE result");
+	zassert_true(IN_RANGE(-1, -2, 2), "Unexpected IN_RANGE result");
+	zassert_true(IN_RANGE(-3, -5, -1), "Unexpected IN_RANGE result");
+	zassert_true(IN_RANGE(0, 0, UINT64_MAX), "Unexpected IN_RANGE result");
+	zassert_true(IN_RANGE(UINT64_MAX, 0, UINT64_MAX), "Unexpected IN_RANGE result");
+	zassert_true(IN_RANGE(0, INT64_MIN, INT64_MAX), "Unexpected IN_RANGE result");
+	zassert_true(IN_RANGE(INT64_MIN, INT64_MIN, INT64_MAX), "Unexpected IN_RANGE result");
+	zassert_true(IN_RANGE(INT64_MAX, INT64_MIN, INT64_MAX), "Unexpected IN_RANGE result");
+
+	zassert_false(IN_RANGE(5, 0, 2), "Unexpected IN_RANGE result");
+	zassert_false(IN_RANGE(5, 10, 0), "Unexpected IN_RANGE result");
+	zassert_false(IN_RANGE(-1, 0, 1), "Unexpected IN_RANGE result");
 }
 
 static void test_FOR_EACH(void)
@@ -305,7 +337,7 @@ static void test_FOR_EACH_IDX(void)
 		FOR_EACH_IDX(FOR_EACH_IDX_MACRO_TEST3, (,), 1, 2, 3)
 	};
 
-	zassert_equal(ARRAY_SIZE(a), 3, "Unexpected value:%d", ARRAY_SIZE(a));
+	zassert_equal(ARRAY_SIZE(a), 3, "Unexpected value:%zu", ARRAY_SIZE(a));
 }
 
 static void test_FOR_EACH_IDX_FIXED_ARG(void)
@@ -329,6 +361,21 @@ static void test_IS_EMPTY(void)
 		     "Expected to be empty");
 	zassert_false(IS_EMPTY(test_IS_EMPTY_NOT_EMPTY),
 		      "Expected to be non-empty");
+	zassert_false(IS_EMPTY("string"),
+		      "Expected to be non-empty");
+	zassert_false(IS_EMPTY(&test_IS_EMPTY),
+		      "Expected to be non-empty");
+}
+
+static void test_IS_EQ(void)
+{
+	zassert_true(IS_EQ(0, 0), "Unexpected IS_EQ result");
+	zassert_true(IS_EQ(1, 1), "Unexpected IS_EQ result");
+	zassert_true(IS_EQ(7, 7), "Unexpected IS_EQ result");
+
+	zassert_false(IS_EQ(0, 1), "Unexpected IS_EQ result");
+	zassert_false(IS_EQ(1, 7), "Unexpected IS_EQ result");
+	zassert_false(IS_EQ(7, 0), "Unexpected IS_EQ result");
 }
 
 static void test_LIST_DROP_EMPTY(void)
@@ -431,15 +478,18 @@ void test_cc(void)
 			 ztest_unit_test(test_UTIL_OR),
 			 ztest_unit_test(test_UTIL_AND),
 			 ztest_unit_test(test_IF_ENABLED),
-			 ztest_unit_test(test_UTIL_LISTIFY),
+			 ztest_unit_test(test_LISTIFY),
 			 ztest_unit_test(test_MACRO_MAP_CAT),
-			 ztest_unit_test(test_z_max_z_min),
+			 ztest_unit_test(test_z_max_z_min_z_clamp),
+			 ztest_unit_test(test_CLAMP),
+			 ztest_unit_test(test_IN_RANGE),
 			 ztest_unit_test(test_FOR_EACH),
 			 ztest_unit_test(test_FOR_EACH_NONEMPTY_TERM),
 			 ztest_unit_test(test_FOR_EACH_FIXED_ARG),
 			 ztest_unit_test(test_FOR_EACH_IDX),
 			 ztest_unit_test(test_FOR_EACH_IDX_FIXED_ARG),
 			 ztest_unit_test(test_IS_EMPTY),
+			 ztest_unit_test(test_IS_EQ),
 			 ztest_unit_test(test_LIST_DROP_EMPTY),
 			 ztest_unit_test(test_nested_FOR_EACH),
 			 ztest_unit_test(test_GET_ARG_N),

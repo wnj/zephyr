@@ -159,7 +159,7 @@ static void msgq_isr(struct k_msgq *pmsgq)
 
 static void thread_entry_get_data(void *p1, void *p2, void *p3)
 {
-	uint32_t rx_buf[MSGQ_LEN];
+	static uint32_t rx_buf[MSGQ_LEN];
 	int i = 0;
 
 	while (k_msgq_get(p1, &rx_buf[i], K_NO_WAIT) != 0) {
@@ -201,7 +201,7 @@ static void msgq_thread_data_passing(struct k_msgq *pmsgq)
 static void get_empty_entry(void *p1, void *p2, void *p3)
 {
 	int ret;
-	uint32_t rx_buf[MSGQ_LEN];
+	static uint32_t rx_buf[MSGQ_LEN];
 
 	/* make sure there is no message in the queue */
 	ret = k_msgq_peek(p1, rx_buf);
@@ -250,7 +250,7 @@ static void put_full_entry(void *p1, void *p2, void *p3)
  * @brief Test thread to thread data passing via message queue
  * @see k_msgq_init(), k_msgq_get(), k_msgq_put(), k_msgq_purge()
  */
-void test_msgq_thread(void)
+ZTEST(msgq_api_1cpu, test_msgq_thread)
 {
 	int ret;
 
@@ -267,17 +267,24 @@ void test_msgq_thread(void)
  * @brief Test thread to thread data passing via message queue
  * @see k_msgq_init(), k_msgq_get(), k_msgq_put(), k_msgq_purge()
  */
-void test_msgq_thread_overflow(void)
+ZTEST(msgq_api, test_msgq_thread_overflow)
 {
 	int ret;
 
 	/**TESTPOINT: init via k_msgq_init*/
-	k_msgq_init(&msgq, tbuffer, MSG_SIZE, 1);
+	k_msgq_init(&msgq, tbuffer, MSG_SIZE, 2);
 	ret = k_sem_init(&end_sema, 0, 1);
+	zassert_equal(ret, 0, NULL);
+
+	ret = k_msgq_put(&msgq, (void *)&data[0], K_FOREVER);
 	zassert_equal(ret, 0, NULL);
 
 	msgq_thread_overflow(&msgq);
 	msgq_thread_overflow(&kmsgq);
+
+	/*verify the write pointer not reset to the buffer start*/
+	zassert_false(msgq.write_ptr == msgq.buffer_start,
+		"Invalid add operation of message queue");
 }
 
 #ifdef CONFIG_USERSPACE
@@ -285,7 +292,7 @@ void test_msgq_thread_overflow(void)
  * @brief Test user thread to kernel thread data passing via message queue
  * @see k_msgq_alloc_init(), k_msgq_get(), k_msgq_put(), k_msgq_purge()
  */
-void test_msgq_user_thread(void)
+ZTEST_USER(msgq_api, test_msgq_user_thread)
 {
 	struct k_msgq *q;
 	int ret;
@@ -303,7 +310,7 @@ void test_msgq_user_thread(void)
  * @brief Test thread to thread data passing via message queue
  * @see k_msgq_alloc_init(), k_msgq_get(), k_msgq_put(), k_msgq_purge()
  */
-void test_msgq_user_thread_overflow(void)
+ZTEST_USER(msgq_api, test_msgq_user_thread_overflow)
 {
 	struct k_msgq *q;
 	int ret;
@@ -322,9 +329,9 @@ void test_msgq_user_thread_overflow(void)
  * @brief Test thread to isr data passing via message queue
  * @see k_msgq_init(), k_msgq_get(), k_msgq_put(), k_msgq_purge()
  */
-void test_msgq_isr(void)
+ZTEST(msgq_api, test_msgq_isr)
 {
-	struct k_msgq stack_msgq;
+	static struct k_msgq stack_msgq;
 
 	/**TESTPOINT: init via k_msgq_init*/
 	k_msgq_init(&stack_msgq, tbuffer, MSG_SIZE, MSGQ_LEN);
@@ -337,7 +344,7 @@ void test_msgq_isr(void)
  * @brief Test pending writer in msgq
  * @see k_msgq_init(), k_msgq_get(), k_msgq_put(), k_msgq_purge()
  */
-void test_msgq_pend_thread(void)
+ZTEST(msgq_api_1cpu, test_msgq_pend_thread)
 {
 	int ret;
 
@@ -354,7 +361,7 @@ void test_msgq_pend_thread(void)
  * pool with various parameters
  * @see k_msgq_alloc_init(), k_msgq_cleanup()
  */
-void test_msgq_alloc(void)
+ZTEST(msgq_api, test_msgq_alloc)
 {
 	int ret;
 
@@ -383,7 +390,7 @@ void test_msgq_alloc(void)
  *
  * @see k_msgq_get()
  */
-void test_msgq_empty(void)
+ZTEST(msgq_api_1cpu, test_msgq_empty)
 {
 	int pri = k_thread_priority_get(k_current_get()) - 1;
 	int ret;
@@ -399,6 +406,16 @@ void test_msgq_empty(void)
 	k_sem_take(&end_sema, K_FOREVER);
 	/* that getting thread is being blocked now */
 	zassert_equal(tid->base.thread_state, _THREAD_PENDING, NULL);
+	/* since there is a thread is waiting for message, this queue
+	 * can't be cleanup
+	 */
+	ret = k_msgq_cleanup(&msgq1);
+	zassert_equal(ret, -EBUSY, NULL);
+
+	/* put a message to wake that getting thread */
+	ret = k_msgq_put(&msgq1, &data[0], K_NO_WAIT);
+	zassert_equal(ret, 0, NULL);
+
 	k_thread_abort(tid);
 }
 
@@ -413,7 +430,7 @@ void test_msgq_empty(void)
  *
  * @see k_msgq_put()
  */
-void test_msgq_full(void)
+ZTEST(msgq_api_1cpu, test_msgq_full)
 {
 	int pri = k_thread_priority_get(k_current_get()) - 1;
 	int ret;
@@ -422,8 +439,9 @@ void test_msgq_full(void)
 	ret = k_sem_init(&end_sema, 0, 1);
 	zassert_equal(ret, 0, NULL);
 
+	ret = k_msgq_put(&msgq1, &data[0], K_NO_WAIT);
+	zassert_equal(ret, 0, NULL);
 
-	k_msgq_put(&msgq1, &data[0], K_NO_WAIT);
 	k_tid_t tid = k_thread_create(&tdata2, tstack2, STACK_SIZE,
 					put_full_entry, &msgq1, NULL,
 					NULL, pri, 0, K_NO_WAIT);

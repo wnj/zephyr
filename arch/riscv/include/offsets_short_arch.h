@@ -20,6 +20,12 @@
 #define _thread_offset_to_sp \
 	(___thread_t_callee_saved_OFFSET + ___callee_saved_t_sp_OFFSET)
 
+#define _thread_offset_to_ra \
+	(___thread_t_callee_saved_OFFSET + ___callee_saved_t_ra_OFFSET)
+
+#define _thread_offset_to_tp \
+	(___thread_t_callee_saved_OFFSET + ___callee_saved_t_tp_OFFSET)
+
 #define _thread_offset_to_s0 \
 	(___thread_t_callee_saved_OFFSET + ___callee_saved_t_s0_OFFSET)
 
@@ -101,6 +107,13 @@
 	(___thread_t_callee_saved_OFFSET + ___callee_saved_t_fs11_OFFSET)
 
 #endif /* defined(CONFIG_FPU) && defined(CONFIG_FPU_SHARING) */
+
+#ifdef CONFIG_USERSPACE
+#define _thread_offset_to_priv_stack_start \
+	(___thread_t_arch_OFFSET + ___thread_arch_t_priv_stack_start_OFFSET)
+#define _thread_offset_to_user_sp \
+	(___thread_t_arch_OFFSET + ___thread_arch_t_user_sp_OFFSET)
+#endif
 
 /* end - threads */
 

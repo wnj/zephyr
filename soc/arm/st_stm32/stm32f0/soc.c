@@ -9,11 +9,12 @@
  * @brief System/hardware module for STM32F0 processor
  */
 
-#include <device.h>
-#include <init.h>
-#include <arch/cpu.h>
-#include <arch/arm/aarch32/cortex_m/cmsis.h>
-#include <linker/linker-defs.h>
+#include <zephyr/device.h>
+#include <zephyr/init.h>
+#include <stm32_ll_system.h>
+#include <zephyr/arch/cpu.h>
+#include <zephyr/arch/arm/aarch32/cortex_m/cmsis.h>
+#include <zephyr/linker/linker-defs.h>
 #include <string.h>
 
 #if defined(CONFIG_SW_VECTOR_RELAY) || defined(CONFIG_SW_VECTOR_RELAY_CLIENT)
@@ -46,7 +47,7 @@ void relocate_vector_table(void)
 {
 #if defined(CONFIG_SW_VECTOR_RELAY) || defined(CONFIG_SW_VECTOR_RELAY_CLIENT)
 	_vector_table_pointer = _vector_start;
-#elif !defined(CONFIG_IS_BOOTLOADER)
+#elif defined(CONFIG_SRAM_VECTOR_TABLE)
 	extern char _ram_vector_start[];
 
 	size_t vector_size = (size_t)_vector_end - (size_t)_vector_start;

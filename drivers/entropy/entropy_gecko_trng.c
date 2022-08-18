@@ -6,7 +6,7 @@
 
 #define DT_DRV_COMPAT silabs_gecko_trng
 
- #include <drivers/entropy.h>
+ #include <zephyr/drivers/entropy.h>
  #include <string.h>
  #include "soc.h"
  #include "em_cmu.h"
@@ -84,7 +84,7 @@ static int entropy_gecko_trng_get_entropy_isr(const struct device *dev,
 	}
 }
 
-static int entropy_gecko_trng_init(const struct device *device)
+static int entropy_gecko_trng_init(const struct device *dev)
 {
 	/* Enable the TRNG0 clock. */
 	CMU_ClockEnable(cmuClock_TRNG0, true);
@@ -99,7 +99,8 @@ static struct entropy_driver_api entropy_gecko_trng_api_funcs = {
 	.get_entropy_isr = entropy_gecko_trng_get_entropy_isr
 };
 
-DEVICE_AND_API_INIT(entropy_gecko_trng, DT_INST_LABEL(0),
-			entropy_gecko_trng_init, NULL, NULL,
-			PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+DEVICE_DT_INST_DEFINE(0,
+			entropy_gecko_trng_init, NULL,
+			NULL, NULL,
+			PRE_KERNEL_1, CONFIG_ENTROPY_INIT_PRIORITY,
 			&entropy_gecko_trng_api_funcs);

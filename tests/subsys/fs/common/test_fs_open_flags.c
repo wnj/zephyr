@@ -10,9 +10,9 @@
  * Tests the fs_open flags
  */
 
-#include <zephyr.h>
-#include <ztest.h>
-#include <fs/fs.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/ztest.h>
+#include <zephyr/fs/fs.h>
 #include <string.h>
 
 /* Path for testr file should be provided by test runner and should start
@@ -140,6 +140,8 @@ void test_fs_open_flags(void)
 		RDWR_SIZE,
 	};
 	int block = 1;
+
+	fs_file_t_init(&ts.file);
 
 	ZBEGIN("Attempt open non-existent");
 	ZOPEN(&ts, 0, -ENOENT);

@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_mqtt_publisher_sample, LOG_LEVEL_DBG);
 
-#include <zephyr.h>
-#include <net/socket.h>
-#include <net/mqtt.h>
-#include <random/rand32.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/net/socket.h>
+#include <zephyr/net/mqtt.h>
+#include <zephyr/random/rand32.h>
 
 #include <string.h>
 #include <errno.h>
@@ -18,7 +18,7 @@ LOG_MODULE_REGISTER(net_mqtt_publisher_sample, LOG_LEVEL_DBG);
 #include "config.h"
 
 #if defined(CONFIG_USERSPACE)
-#include <app_memory/app_memdomain.h>
+#include <zephyr/app_memory/app_memdomain.h>
 K_APPMEM_PARTITION_DEFINE(app_partition);
 struct k_mem_domain app_domain;
 #define APP_BMEM K_APP_BMEM(app_partition)
@@ -67,7 +67,7 @@ static APP_DMEM sec_tag_t m_sec_tags[] = {
 #if defined(MBEDTLS_X509_CRT_PARSE_C) || defined(CONFIG_NET_SOCKETS_OFFLOAD)
 		APP_CA_CERT_TAG,
 #endif
-#if defined(MBEDTLS_KEY_EXCHANGE__SOME__PSK_ENABLED)
+#if defined(MBEDTLS_KEY_EXCHANGE_SOME_PSK_ENABLED)
 		APP_PSK_TAG,
 #endif
 };
@@ -85,7 +85,7 @@ static int tls_init(void)
 	}
 #endif
 
-#if defined(MBEDTLS_KEY_EXCHANGE__SOME__PSK_ENABLED)
+#if defined(MBEDTLS_KEY_EXCHANGE_SOME_PSK_ENABLED)
 	err = tls_credential_add(APP_PSK_TAG, TLS_CREDENTIAL_PSK,
 				 client_psk, sizeof(client_psk));
 	if (err < 0) {
@@ -482,7 +482,7 @@ static int publisher(void)
 	return r;
 }
 
-static void start_app(void)
+static int start_app(void)
 {
 	int r = 0, i = 0;
 
@@ -494,18 +494,24 @@ static void start_app(void)
 			k_sleep(K_MSEC(5000));
 		}
 	}
+
+	return r;
 }
 
 #if defined(CONFIG_USERSPACE)
 #define STACK_SIZE 2048
-#define THREAD_PRIORITY K_PRIO_COOP(8)
+
+#if IS_ENABLED(CONFIG_NET_TC_THREAD_COOPERATIVE)
+#define THREAD_PRIORITY K_PRIO_COOP(CONFIG_NUM_COOP_PRIORITIES - 1)
+#else
+#define THREAD_PRIORITY K_PRIO_PREEMPT(8)
+#endif
 
 K_THREAD_DEFINE(app_thread, STACK_SIZE,
 		start_app, NULL, NULL, NULL,
 		THREAD_PRIORITY, K_USER, -1);
 
-static K_MEM_POOL_DEFINE(app_mem_pool, sizeof(uintptr_t), 1024,
-			 2, sizeof(uintptr_t));
+static K_HEAP_DEFINE(app_mem_pool, 1024 * 2);
 #endif
 
 void main(void)
@@ -518,6 +524,8 @@ void main(void)
 #endif
 
 #if defined(CONFIG_USERSPACE)
+	int ret;
+
 	struct k_mem_partition *parts[] = {
 #if Z_LIBC_PARTITION_EXISTS
 		&z_libc_partition,
@@ -525,13 +533,16 @@ void main(void)
 		&app_partition
 	};
 
-	k_mem_domain_init(&app_domain, ARRAY_SIZE(parts), parts);
+	ret = k_mem_domain_init(&app_domain, ARRAY_SIZE(parts), parts);
+	__ASSERT(ret == 0, "k_mem_domain_init() failed %d", ret);
+	ARG_UNUSED(ret);
+
 	k_mem_domain_add_thread(&app_domain, app_thread);
-	k_thread_resource_pool_assign(app_thread, &app_mem_pool);
+	k_thread_heap_assign(app_thread, &app_mem_pool);
 
 	k_thread_start(app_thread);
 	k_thread_join(app_thread, K_FOREVER);
 #else
-	start_app();
+	exit(start_app());
 #endif
 }

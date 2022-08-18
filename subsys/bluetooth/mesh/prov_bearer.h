@@ -1,5 +1,3 @@
-/*  Bluetooth Mesh */
-
 /*
  * Copyright (c) 2020 Nordic Semiconductor ASA
  *
@@ -12,7 +10,7 @@
  *
  *  @brief Required headroom for the bearer packet buffers.
  */
-#if defined(CONFIG_BT_MESH_PB_GATT)
+#if defined(CONFIG_BT_MESH_PB_GATT_COMMON)
 #define PROV_BEARER_BUF_HEADROOM 5
 #else
 #define PROV_BEARER_BUF_HEADROOM 0

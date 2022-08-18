@@ -2,6 +2,8 @@ identifier: sam_e70_xplained
 name: SAM E70 Xplained
 type: mcu
 arch: arm
+ram: 384
+flash: 2048
 toolchain:
   - zephyr
   - gnuarmemb
@@ -9,8 +11,12 @@ toolchain:
 supported:
   - netif:eth
   - adc
+  - i2s
   - gpio
   - spi
   - watchdog
   - usb_device
   - pwm
+  - can
+  - canfd
+  - hwinfo

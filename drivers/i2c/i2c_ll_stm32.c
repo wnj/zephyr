@@ -5,25 +5,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <drivers/clock_control/stm32_clock_control.h>
-#include <drivers/clock_control.h>
-#include <sys/util.h>
-#include <kernel.h>
+#include <zephyr/drivers/clock_control/stm32_clock_control.h>
+#include <zephyr/drivers/clock_control.h>
+#include <zephyr/sys/util.h>
+#include <zephyr/kernel.h>
 #include <soc.h>
+#include <stm32_ll_i2c.h>
+#include <stm32_ll_rcc.h>
 #include <errno.h>
-#include <drivers/i2c.h>
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/pinctrl.h>
 #include "i2c_ll_stm32.h"
 
 #define LOG_LEVEL CONFIG_I2C_LOG_LEVEL
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(i2c_ll_stm32);
 
 #include "i2c-priv.h"
 
 int i2c_stm32_runtime_configure(const struct device *dev, uint32_t config)
 {
-	const struct i2c_stm32_config *cfg = DEV_CFG(dev);
-	struct i2c_stm32_data *data = DEV_DATA(dev);
+	const struct i2c_stm32_config *cfg = dev->config;
+	struct i2c_stm32_data *data = dev->data;
 	I2C_TypeDef *i2c = cfg->i2c;
 	uint32_t clock = 0U;
 	int ret;
@@ -39,7 +42,7 @@ int i2c_stm32_runtime_configure(const struct device *dev, uint32_t config)
 	LL_RCC_GetSystemClocksFreq(&rcc_clocks);
 	clock = rcc_clocks.SYSCLK_Frequency;
 #else
-	if (clock_control_get_rate(device_get_binding(STM32_CLOCK_CONTROL_NAME),
+	if (clock_control_get_rate(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
 			(clock_control_subsys_t *) &cfg->pclken, &clock) < 0) {
 		LOG_ERR("Failed call clock_control_get_rate");
 		return -EIO;
@@ -58,12 +61,62 @@ int i2c_stm32_runtime_configure(const struct device *dev, uint32_t config)
 	return ret;
 }
 
+static inline int
+i2c_stm32_transaction(const struct device *dev,
+		      struct i2c_msg msg, uint8_t *next_msg_flags,
+		      uint16_t periph)
+{
+	/*
+	 * Perform a I2C transaction, while taking into account the STM32 I2C
+	 * peripheral has a limited maximum chunk size. Take appropriate action
+	 * if the message to send exceeds that limit.
+	 *
+	 * The last chunk of a transmission uses this function's next_msg_flags
+	 * parameter for its backend calls (_write/_read). Any previous chunks
+	 * use a copy of the current message's flags, with the STOP and RESTART
+	 * bits turned off. This will cause the backend to use reload-mode,
+	 * which will make the combination of all chunks to look like one big
+	 * transaction on the wire.
+	 */
+	const uint32_t i2c_stm32_maxchunk = 255U;
+	const uint8_t saved_flags = msg.flags;
+	uint8_t combine_flags =
+		saved_flags & ~(I2C_MSG_STOP | I2C_MSG_RESTART);
+	uint8_t *flagsp = NULL;
+	uint32_t rest = msg.len;
+	int ret = 0;
+
+	do { /* do ... while to allow zero-length transactions */
+		if (msg.len > i2c_stm32_maxchunk) {
+			msg.len = i2c_stm32_maxchunk;
+			msg.flags &= ~I2C_MSG_STOP;
+			flagsp = &combine_flags;
+		} else {
+			msg.flags = saved_flags;
+			flagsp = next_msg_flags;
+		}
+		if ((msg.flags & I2C_MSG_RW_MASK) == I2C_MSG_WRITE) {
+			ret = stm32_i2c_msg_write(dev, &msg, flagsp, periph);
+		} else {
+			ret = stm32_i2c_msg_read(dev, &msg, flagsp, periph);
+		}
+		if (ret < 0) {
+			break;
+		}
+		rest -= msg.len;
+		msg.buf += msg.len;
+		msg.len = rest;
+	} while (rest > 0U);
+
+	return ret;
+}
+
 #define OPERATION(msg) (((struct i2c_msg *) msg)->flags & I2C_MSG_RW_MASK)
 
 static int i2c_stm32_transfer(const struct device *dev, struct i2c_msg *msg,
 			      uint8_t num_msgs, uint16_t slave)
 {
-	struct i2c_stm32_data *data = DEV_DATA(dev);
+	struct i2c_stm32_data *data = dev->data;
 	struct i2c_msg *current, *next;
 	int ret = 0;
 
@@ -123,44 +176,14 @@ static int i2c_stm32_transfer(const struct device *dev, struct i2c_msg *msg,
 			next = current + 1;
 			next_msg_flags = &(next->flags);
 		}
-		do {
-			uint32_t temp_len = current->len;
-			uint8_t tmp_msg_flags = current->flags & ~I2C_MSG_RESTART;
-			uint8_t tmp_next_msg_flags = next_msg_flags ?
-							*next_msg_flags : 0;
-
-			if (current->len > 255) {
-				current->len = 255U;
-				current->flags &= ~I2C_MSG_STOP;
-				if (next_msg_flags) {
-					*next_msg_flags = current->flags &
-							  ~I2C_MSG_RESTART;
-				}
-			}
-			if ((current->flags & I2C_MSG_RW_MASK) ==
-								I2C_MSG_WRITE) {
-				ret = stm32_i2c_msg_write(dev, current,
-							  next_msg_flags,
-							  slave);
-			} else {
-				ret = stm32_i2c_msg_read(dev, current,
-							 next_msg_flags, slave);
-			}
-
-			if (ret < 0) {
-				goto exit;
-			}
-			if (next_msg_flags) {
-				*next_msg_flags = tmp_next_msg_flags;
-			}
-			current->buf += current->len;
-			current->flags = tmp_msg_flags;
-			current->len = temp_len - current->len;
-		} while (current->len > 0);
+		ret = i2c_stm32_transaction(dev, *current, next_msg_flags, slave);
+		if (ret < 0) {
+			break;
+		}
 		current++;
 		num_msgs--;
 	}
-exit:
+
 	k_sem_give(&data->bus_mutex);
 	return ret;
 }
@@ -168,23 +191,30 @@ exit:
 static const struct i2c_driver_api api_funcs = {
 	.configure = i2c_stm32_runtime_configure,
 	.transfer = i2c_stm32_transfer,
-#if defined(CONFIG_I2C_SLAVE)
-	.slave_register = i2c_stm32_slave_register,
-	.slave_unregister = i2c_stm32_slave_unregister,
+#if defined(CONFIG_I2C_TARGET)
+	.target_register = i2c_stm32_target_register,
+	.target_unregister = i2c_stm32_target_unregister,
 #endif
 };
 
 static int i2c_stm32_init(const struct device *dev)
 {
-	const struct device *clock = device_get_binding(STM32_CLOCK_CONTROL_NAME);
-	const struct i2c_stm32_config *cfg = DEV_CFG(dev);
+	const struct device *clock = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
+	const struct i2c_stm32_config *cfg = dev->config;
 	uint32_t bitrate_cfg;
 	int ret;
-	struct i2c_stm32_data *data = DEV_DATA(dev);
+	struct i2c_stm32_data *data = dev->data;
 #ifdef CONFIG_I2C_STM32_INTERRUPT
-	k_sem_init(&data->device_sync_sem, 0, UINT_MAX);
+	k_sem_init(&data->device_sync_sem, 0, K_SEM_MAX_LIMIT);
 	cfg->irq_config_func(dev);
 #endif
+
+	/* Configure dt provided device signals when available */
+	ret = pinctrl_apply_state(cfg->pcfg, PINCTRL_STATE_DEFAULT);
+	if (ret < 0) {
+		LOG_ERR("I2C pinctrl setup failed (%d)", ret);
+		return ret;
+	}
 
 	/*
 	 * initialize mutex used when multiple transfers
@@ -193,7 +223,11 @@ static int i2c_stm32_init(const struct device *dev)
 	 */
 	k_sem_init(&data->bus_mutex, 1, 1);
 
-	__ASSERT_NO_MSG(clock);
+	if (!device_is_ready(clock)) {
+		LOG_ERR("clock control device not ready");
+		return -ENODEV;
+	}
+
 	if (clock_control_on(clock,
 		(clock_control_subsys_t *) &cfg->pclken) != 0) {
 		LOG_ERR("i2c: failure enabling clock");
@@ -229,9 +263,9 @@ static int i2c_stm32_init(const struct device *dev)
 	}
 #endif /* CONFIG_SOC_SERIES_STM32F3X) || CONFIG_SOC_SERIES_STM32F0X */
 
-#if defined(CONFIG_SOC_STM32F103X8) || defined(CONFIG_SOC_STM32F103XB)
+#if defined(CONFIG_SOC_SERIES_STM32F1X)
 	/*
-	 * Force i2c reset for STM32 (F101X8/B, F102X8/B), F103X8/B.
+	 * Force i2c reset for STM32F1 series.
 	 * So that they can enter master mode properly.
 	 * Issue described in ES096 2.14.7
 	 */
@@ -243,7 +277,7 @@ static int i2c_stm32_init(const struct device *dev)
 
 	bitrate_cfg = i2c_map_dt_bitrate(cfg->bitrate);
 
-	ret = i2c_stm32_runtime_configure(dev, I2C_MODE_MASTER | bitrate_cfg);
+	ret = i2c_stm32_runtime_configure(dev, I2C_MODE_CONTROLLER | bitrate_cfg);
 	if (ret < 0) {
 		LOG_ERR("i2c: failure initializing");
 		return ret;
@@ -262,9 +296,9 @@ static int i2c_stm32_init(const struct device *dev)
 		IRQ_CONNECT(DT_IRQN(DT_NODELABEL(name)),		\
 			    DT_IRQ(DT_NODELABEL(name), priority),	\
 			    stm32_i2c_combined_isr,			\
-			    DEVICE_GET(i2c_stm32_##name), 0);		\
+			    DEVICE_DT_GET(DT_NODELABEL(name)), 0);	\
 		irq_enable(DT_IRQN(DT_NODELABEL(name)));		\
-	} while (0)
+	} while (false)
 #else
 #define STM32_I2C_IRQ_CONNECT_AND_ENABLE(name)				\
 	do {								\
@@ -272,16 +306,16 @@ static int i2c_stm32_init(const struct device *dev)
 			    DT_IRQ_BY_NAME(DT_NODELABEL(name), event,	\
 								priority),\
 			    stm32_i2c_event_isr,			\
-			    DEVICE_GET(i2c_stm32_##name), 0);		\
+			    DEVICE_DT_GET(DT_NODELABEL(name)), 0);	\
 		irq_enable(DT_IRQ_BY_NAME(DT_NODELABEL(name), event, irq));\
 									\
 		IRQ_CONNECT(DT_IRQ_BY_NAME(DT_NODELABEL(name), error, irq),\
 			    DT_IRQ_BY_NAME(DT_NODELABEL(name), error,	\
 								priority),\
 			    stm32_i2c_error_isr,			\
-			    DEVICE_GET(i2c_stm32_##name), 0);		\
+			    DEVICE_DT_GET(DT_NODELABEL(name)), 0);	\
 		irq_enable(DT_IRQ_BY_NAME(DT_NODELABEL(name), error, irq));\
-	} while (0)
+	} while (false)
 #endif /* CONFIG_I2C_STM32_COMBINED_INTERRUPT */
 
 #define STM32_I2C_IRQ_HANDLER_DECL(name)				\
@@ -318,6 +352,8 @@ STM32_I2C_IRQ_HANDLER_DECL(name);					\
 									\
 DEFINE_TIMINGS(name)							\
 									\
+PINCTRL_DT_DEFINE(DT_NODELABEL(name));					\
+									\
 static const struct i2c_stm32_config i2c_stm32_cfg_##name = {		\
 	.i2c = (I2C_TypeDef *)DT_REG_ADDR(DT_NODELABEL(name)),		\
 	.pclken = {							\
@@ -326,15 +362,16 @@ static const struct i2c_stm32_config i2c_stm32_cfg_##name = {		\
 	},								\
 	STM32_I2C_IRQ_HANDLER_FUNCTION(name)				\
 	.bitrate = DT_PROP(DT_NODELABEL(name), clock_frequency),	\
+	.pcfg = PINCTRL_DT_DEV_CONFIG_GET(DT_NODELABEL(name)),		\
 	USE_TIMINGS(name)						\
 };									\
 									\
 static struct i2c_stm32_data i2c_stm32_dev_data_##name;			\
 									\
-DEVICE_AND_API_INIT(i2c_stm32_##name, DT_LABEL(DT_NODELABEL(name)),	\
-		    &i2c_stm32_init, &i2c_stm32_dev_data_##name,	\
+I2C_DEVICE_DT_DEFINE(DT_NODELABEL(name), i2c_stm32_init,		\
+		    NULL, &i2c_stm32_dev_data_##name,			\
 		    &i2c_stm32_cfg_##name,				\
-		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,	\
+		    POST_KERNEL, CONFIG_I2C_INIT_PRIORITY,		\
 		    &api_funcs);					\
 									\
 STM32_I2C_IRQ_HANDLER(name)

@@ -88,7 +88,7 @@ hardware features:
 | WDT       | on-chip    | watchdog             |
 +-----------+------------+----------------------+
 
-Other hardware features are not supported by the Zephyr kernel.
+Other hardware features have not been enabled yet for this board.
 See `BL654 website`_
 for a complete list of BL654 Development Kit board hardware features.
 
@@ -115,10 +115,9 @@ Push buttons
 Programming and Debugging
 *************************
 
-Applications for the ``bl654_dvk`` board configuration can be
-built and flashed in the usual way (see :ref:`build_an_application`
-and :ref:`application_run` for more details); however, the standard
-debugging targets are not currently available.
+Applications for the ``bl654_dvk`` board configuration can be built, flashed,
+and debugged in the usual way. See :ref:`build_an_application` and
+:ref:`application_run` for more details on building and running.
 
 Flashing
 ========

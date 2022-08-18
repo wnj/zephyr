@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <ztest.h>
+#include <zephyr/ztest.h>
 
 /* Built-time math test.  Zephyr code depends on a standard C ABI with
  * 2's complement signed math.  As this isn't technically guaranteed
@@ -13,7 +13,7 @@
  */
 
 /* Recent GCC's can detect integer overflow in static expressions and
- * will warn about it heplfully.  But obviously integer overflow is
+ * will warn about it helpfully.  But obviously integer overflow is
  * the whole point here, so turn that warning off.
  */
 #ifdef __GNUC__

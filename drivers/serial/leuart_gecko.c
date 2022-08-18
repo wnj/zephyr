@@ -7,7 +7,7 @@
 #define DT_DRV_COMPAT silabs_gecko_leuart
 
 #include <errno.h>
-#include <drivers/uart.h>
+#include <zephyr/drivers/uart.h>
 #include <em_leuart.h>
 #include <em_gpio.h>
 #include <em_cmu.h>
@@ -18,12 +18,9 @@
 #define CLOCK_ID_PRFX(prefix, suffix) CLOCK_ID_PRFX2(prefix, suffix)
 #define CLOCK_LEUART(id) CLOCK_ID_PRFX(LEUART_PREFIX, id)
 
-#define DEV_CFG(dev) \
-	((const struct leuart_gecko_config * const)(dev)->config)
-#define DEV_DATA(dev) \
-	((struct leuart_gecko_data * const)(dev)->data)
 #define DEV_BASE(dev) \
-	((LEUART_TypeDef *)(DEV_CFG(dev))->base)
+	((LEUART_TypeDef *) \
+	 ((const struct leuart_gecko_config * const)(dev)->config)->base)
 
 struct leuart_gecko_config {
 	LEUART_TypeDef *base;
@@ -244,7 +241,7 @@ static void leuart_gecko_isr(const struct device *dev)
 
 static void leuart_gecko_init_pins(const struct device *dev)
 {
-	const struct leuart_gecko_config *config = DEV_CFG(dev);
+	const struct leuart_gecko_config *config = dev->config;
 	LEUART_TypeDef *base = DEV_BASE(dev);
 
 	soc_gpio_configure(&config->pin_rx);
@@ -263,7 +260,7 @@ static void leuart_gecko_init_pins(const struct device *dev)
 
 static int leuart_gecko_init(const struct device *dev)
 {
-	const struct leuart_gecko_config *config = DEV_CFG(dev);
+	const struct leuart_gecko_config *config = dev->config;
 	LEUART_TypeDef *base = DEV_BASE(dev);
 	LEUART_Init_TypeDef leuartInit = LEUART_INIT_DEFAULT;
 
@@ -351,10 +348,10 @@ static const struct leuart_gecko_config leuart_gecko_0_config = {
 
 static struct leuart_gecko_data leuart_gecko_0_data;
 
-DEVICE_AND_API_INIT(leuart_0, DT_INST_LABEL(0),
-		    &leuart_gecko_init, &leuart_gecko_0_data,
+DEVICE_DT_INST_DEFINE(0, &leuart_gecko_init,
+		    NULL, &leuart_gecko_0_data,
 		    &leuart_gecko_0_config, PRE_KERNEL_1,
-		    CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    CONFIG_SERIAL_INIT_PRIORITY,
 		    &leuart_gecko_driver_api);
 
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
@@ -362,7 +359,7 @@ static void leuart_gecko_config_func_0(const struct device *dev)
 {
 	IRQ_CONNECT(DT_INST_IRQN(0),
 		    DT_INST_IRQ(0, priority),
-		    leuart_gecko_isr, DEVICE_GET(leuart_0), 0);
+		    leuart_gecko_isr, DEVICE_DT_INST_GET(0), 0);
 
 	irq_enable(DT_INST_IRQN(0));
 }
@@ -404,10 +401,10 @@ static const struct leuart_gecko_config leuart_gecko_1_config = {
 
 static struct leuart_gecko_data leuart_gecko_1_data;
 
-DEVICE_AND_API_INIT(leuart_1, DT_INST_LABEL(1),
-		    &leuart_gecko_init, &leuart_gecko_1_data,
+DEVICE_DT_INST_DEFINE(1, &leuart_gecko_init,
+		    NULL, &leuart_gecko_1_data,
 		    &leuart_gecko_1_config, PRE_KERNEL_1,
-		    CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		    CONFIG_SERIAL_INIT_PRIORITY,
 		    &leuart_gecko_driver_api);
 
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
@@ -415,7 +412,7 @@ static void leuart_gecko_config_func_1(const struct device *dev)
 {
 	IRQ_CONNECT(DT_INST_IRQN(1),
 		    DT_INST_IRQ(1, priority),
-		    leuart_gecko_isr, DEVICE_GET(leuart_1), 0);
+		    leuart_gecko_isr, DEVICE_DT_INST_GET(1), 0);
 
 	irq_enable(DT_INST_IRQN(1));
 }

@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <ztest.h>
+#include <zephyr/ztest.h>
 #include <soc.h>
 #include <kernel_arch_func.h>
-#include <device.h>
-#include <drivers/dma.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/dma.h>
 
 #define DMA_BUFF_SIZE		1024
 
@@ -44,8 +44,8 @@ void test_msgdma(void)
 	static uint32_t chan_id;
 	int i;
 
-	dma = device_get_binding(CONFIG_DMA_0_NAME);
-	zassert_true(dma != NULL, "DMA_0 device not found!!");
+	dma = DEVICE_DT_GET(DT_NODELABEL(dma));
+	__ASSERT_NO_MSG(device_is_ready(dma));
 
 	/* Init tx buffer */
 	for (i = 0; i < DMA_BUFF_SIZE; i++) {

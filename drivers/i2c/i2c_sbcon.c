@@ -14,9 +14,9 @@
  * hardware state of two-bit serial interfaces like I2C.
  */
 
-#include <device.h>
+#include <zephyr/device.h>
 #include <errno.h>
-#include <drivers/i2c.h>
+#include <zephyr/drivers/i2c.h>
 #include "i2c_bitbang.h"
 
 /* SBCon hardware registers layout */
@@ -116,8 +116,9 @@ static const struct i2c_sbcon_config i2c_sbcon_dev_cfg_##_num = {	\
 	.sbcon		= (void *)DT_INST_REG_ADDR(_num), \
 };									\
 									\
-DEVICE_AND_API_INIT(i2c_sbcon_##_num, DT_INST_LABEL(_num), \
+I2C_DEVICE_DT_INST_DEFINE(_num,						\
 	    i2c_sbcon_init,						\
+	    NULL,							\
 	    &i2c_sbcon_dev_data_##_num,					\
 	    &i2c_sbcon_dev_cfg_##_num,					\
 	    PRE_KERNEL_2, CONFIG_I2C_INIT_PRIORITY, &api);

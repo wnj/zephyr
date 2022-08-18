@@ -17,22 +17,22 @@
  * This might not be what you want to do in your app so caveat emptor.
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_echo_client_sample, LOG_LEVEL_DBG);
 
-#include <zephyr.h>
+#include <zephyr/zephyr.h>
 #include <errno.h>
 #include <stdio.h>
 
-#include <net/socket.h>
-#include <net/tls_credentials.h>
+#include <zephyr/net/socket.h>
+#include <zephyr/net/tls_credentials.h>
 
-#include <net/net_mgmt.h>
-#include <net/net_event.h>
-#include <net/net_conn_mgr.h>
+#include <zephyr/net/net_mgmt.h>
+#include <zephyr/net/net_event.h>
+#include <zephyr/net/net_conn_mgr.h>
 
 #if defined(CONFIG_USERSPACE)
-#include <app_memory/app_memdomain.h>
+#include <zephyr/app_memory/app_memdomain.h>
 K_APPMEM_PARTITION_DEFINE(app_partition);
 struct k_mem_domain app_domain;
 #endif
@@ -233,7 +233,10 @@ static void init_app(void)
 		&app_partition
 	};
 
-	k_mem_domain_init(&app_domain, ARRAY_SIZE(parts), parts);
+	int ret = k_mem_domain_init(&app_domain, ARRAY_SIZE(parts), parts);
+
+	__ASSERT(ret == 0, "k_mem_domain_init() failed %d", ret);
+	ARG_UNUSED(ret);
 #endif
 
 #if defined(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
@@ -274,7 +277,7 @@ static void init_app(void)
 	init_vlan();
 }
 
-static void start_client(void)
+static int start_client(void)
 {
 	int iterations = CONFIG_NET_SAMPLE_SEND_ITERATIONS;
 	int i = 0;
@@ -300,6 +303,8 @@ static void start_client(void)
 
 		stop_udp_and_tcp();
 	}
+
+	return ret;
 }
 
 void main(void)
@@ -314,6 +319,8 @@ void main(void)
 		k_sem_give(&run_app);
 	}
 
+	k_thread_priority_set(k_current_get(), THREAD_PRIORITY);
+
 #if defined(CONFIG_USERSPACE)
 	k_thread_access_grant(k_current_get(), &run_app);
 	k_mem_domain_add_thread(&app_domain, k_current_get());
@@ -321,6 +328,6 @@ void main(void)
 	k_thread_user_mode_enter((k_thread_entry_t)start_client, NULL, NULL,
 				 NULL);
 #else
-	start_client();
+	exit(start_client());
 #endif
 }

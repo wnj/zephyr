@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr.h>
-#include <syscall_handler.h>
-#include <ztest.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/syscall_handler.h>
+#include <zephyr/ztest.h>
 #include "test_syscalls.h"
 
 #define DB_VAL 0xDEADBEEF
@@ -24,28 +24,29 @@ void z_impl_test_cpu_write_reg(void)
 	/* Part below is made to test that kernel scrubs CPU registers
 	 * after returning from the system call
 	 */
-#if CONFIG_X86
 #ifndef CONFIG_X86_64
 	__asm__ volatile (
-		"movl $0xDEADBEEF, %eax;\n\t"
-		"movl $0xDEADBEEF, %ebx;\n\t"
-		"movl $0xDEADBEEF, %ecx;\n\t"
-		"movl $0xDEADBEEF, %edx;\n\t"
-		"movl $0xDEADBEEF, %edi;\n\t"
+		"movl $0xDEADBEEF, %%eax;\n\t"
+		"movl $0xDEADBEEF, %%ebx;\n\t"
+		"movl $0xDEADBEEF, %%ecx;\n\t"
+		"movl $0xDEADBEEF, %%edx;\n\t"
+		"movl $0xDEADBEEF, %%edi;\n\t"
+		: : : "eax", "ebx", "ecx", "edx", "edi"
 		);
 #else
 	__asm__ volatile (
-		"movq $0xDEADBEEF, %rax;\n\t"
-		"movq $0xDEADBEEF, %rcx;\n\t"
-		"movq $0xDEADBEEF, %rdx;\n\t"
-		"movq $0xDEADBEEF, %rsi;\n\t"
-		"movq $0xDEADBEEF, %rdi;\n\t"
-		"movq $0xDEADBEEF, %r8;\n\t"
-		"movq $0xDEADBEEF, %r9;\n\t"
-		"movq $0xDEADBEEF, %r10;\n\t"
-		"movq $0xDEADBEEF, %r11;\n\t"
+		"movq $0xDEADBEEF, %%rax;\n\t"
+		"movq $0xDEADBEEF, %%rcx;\n\t"
+		"movq $0xDEADBEEF, %%rdx;\n\t"
+		"movq $0xDEADBEEF, %%rsi;\n\t"
+		"movq $0xDEADBEEF, %%rdi;\n\t"
+		"movq $0xDEADBEEF, %%r8;\n\t"
+		"movq $0xDEADBEEF, %%r9;\n\t"
+		"movq $0xDEADBEEF, %%r10;\n\t"
+		"movq $0xDEADBEEF, %%r11;\n\t"
+		: : : "rax", "rcx", "rdx", "rsi", "rdi",
+		      "r8",  "r9",  "r10", "r11"
 		);
-#endif
 #endif
 }
 
@@ -66,9 +67,8 @@ static inline void z_vrfy_test_cpu_write_reg(void)
  *
  * @ingroup kernel_memprotect_tests
  */
-void test_syscall_cpu_scrubs_regs(void)
+ZTEST_USER(x86_cpu_scrubs_regs, test_syscall_cpu_scrubs_regs)
 {
-#if CONFIG_X86
 #ifndef CONFIG_X86_64
 	int x86_reg_val[5];
 
@@ -119,12 +119,6 @@ void test_syscall_cpu_scrubs_regs(void)
 				"not scrubbed after system call.");
 	}
 #endif
-#endif
 }
 
-void test_main(void)
-{
-	ztest_test_suite(test_x86_cpu_scrubs_regs,
-		ztest_user_unit_test(test_syscall_cpu_scrubs_regs));
-	ztest_run_test_suite(test_x86_cpu_scrubs_regs);
-}
+ZTEST_SUITE(x86_cpu_scrubs_regs, NULL, NULL, NULL, NULL, NULL);

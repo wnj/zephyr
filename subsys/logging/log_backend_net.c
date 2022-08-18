@@ -4,15 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(log_backend_net, CONFIG_LOG_DEFAULT_LEVEL);
 
-#include <logging/log_backend.h>
-#include <logging/log_core.h>
-#include <logging/log_output.h>
-#include <logging/log_msg.h>
-#include <net/net_pkt.h>
-#include <net/net_context.h>
+#include <zephyr/logging/log_backend.h>
+#include <zephyr/logging/log_core.h>
+#include <zephyr/logging/log_output.h>
+#include <zephyr/net/net_pkt.h>
+#include <zephyr/net/net_context.h>
 
 /* Set this to 1 if you want to see what is being sent to server */
 #define DEBUG_PRINTING 0
@@ -35,6 +34,7 @@ static uint8_t output_buf[CONFIG_LOG_BACKEND_NET_MAX_BUF_SIZE];
 static bool net_init_done;
 struct sockaddr server_addr;
 static bool panic_mode;
+static uint32_t log_format_current = CONFIG_LOG_BACKEND_NET_OUTPUT_DEFAULT;
 
 const struct log_backend *log_backend_net_get(void);
 
@@ -78,8 +78,8 @@ LOG_OUTPUT_DEFINE(log_output_net, line_out, output_buf, sizeof(output_buf));
 static int do_net_init(void)
 {
 	struct sockaddr *local_addr = NULL;
-	struct sockaddr_in6 local_addr6;
-	struct sockaddr_in local_addr4;
+	struct sockaddr_in6 local_addr6 = {0};
+	struct sockaddr_in local_addr4 = {0};
 	socklen_t server_addr_len;
 	struct net_context *ctx;
 	int ret;
@@ -172,9 +172,11 @@ static int do_net_init(void)
 	return 0;
 }
 
-static void send_output(const struct log_backend *const backend,
-			struct log_msg *msg)
+static void process(const struct log_backend *const backend,
+		    union log_msg_generic *msg)
 {
+	uint32_t flags = LOG_OUTPUT_FLAG_FORMAT_SYSLOG | LOG_OUTPUT_FLAG_TIMESTAMP;
+
 	if (panic_mode) {
 		return;
 	}
@@ -183,19 +185,20 @@ static void send_output(const struct log_backend *const backend,
 		net_init_done = true;
 	}
 
-	log_msg_get(msg);
+	log_format_func_t log_output_func = log_format_func_t_get(log_format_current);
 
-	log_output_msg_process(&log_output_net, msg,
-			       LOG_OUTPUT_FLAG_FORMAT_SYSLOG |
-			       LOG_OUTPUT_FLAG_TIMESTAMP |
-			(IS_ENABLED(CONFIG_LOG_BACKEND_NET_SYST_ENABLE) ?
-			LOG_OUTPUT_FLAG_FORMAT_SYST : 0));
-
-	log_msg_put(msg);
+	log_output_func(&log_output_net, &msg->log, flags);
 }
 
-static void init_net(void)
+static int format_set(const struct log_backend *const backend, uint32_t log_type)
 {
+	log_format_current = log_type;
+	return 0;
+}
+
+static void init_net(struct log_backend const *const backend)
+{
+	ARG_UNUSED(backend);
 	int ret;
 
 	net_sin(&server_addr)->sin_port = htons(514);
@@ -216,37 +219,11 @@ static void panic(struct log_backend const *const backend)
 	panic_mode = true;
 }
 
-static void sync_string(const struct log_backend *const backend,
-		     struct log_msg_ids src_level, uint32_t timestamp,
-		     const char *fmt, va_list ap)
-{
-	uint32_t flags = LOG_OUTPUT_FLAG_LEVEL | LOG_OUTPUT_FLAG_FORMAT_SYSLOG |
-		LOG_OUTPUT_FLAG_TIMESTAMP |
-		(IS_ENABLED(CONFIG_LOG_BACKEND_NET_SYST_ENABLE) ?
-		LOG_OUTPUT_FLAG_FORMAT_SYST : 0);
-	uint32_t key;
-
-	if (!net_init_done && do_net_init() == 0) {
-		net_init_done = true;
-	}
-
-	key = irq_lock();
-	log_output_string(&log_output_net, src_level,
-			  timestamp, fmt, ap, flags);
-	irq_unlock(key);
-}
-
 const struct log_backend_api log_backend_net_api = {
 	.panic = panic,
 	.init = init_net,
-	.put = IS_ENABLED(CONFIG_LOG_IMMEDIATE) ? NULL : send_output,
-	.put_sync_string = IS_ENABLED(CONFIG_LOG_IMMEDIATE) ?
-							sync_string : NULL,
-	/* Currently we do not send hexdumps over network to remote server
-	 * in CONFIG_LOG_IMMEDIATE mode. This is just to save resources,
-	 * this can be revisited if needed.
-	 */
-	.put_sync_hexdump = NULL,
+	.process = process,
+	.format_set = format_set,
 };
 
 /* Note that the backend can be activated only after we have networking

@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <ztest.h>
-#include <irq_offload.h>
-#include <sys/sem.h>
+#include <zephyr/ztest.h>
+#include <zephyr/irq_offload.h>
+#include <zephyr/sys/sem.h>
 
 /* Macro declarations */
 #define SEM_INIT_VAL (0U)
 #define SEM_MAX_VAL  (10U)
 #define SEM_TIMEOUT (K_MSEC(100))
-#define STACK_SIZE (512 + CONFIG_TEST_EXTRA_STACKSIZE)
+#define STACK_SIZE (512 + CONFIG_TEST_EXTRA_STACK_SIZE)
 #define TOTAL_THREADS_WAITING (3)
 
 /******************************************************************************/
@@ -166,7 +166,7 @@ void test_simple_sem_from_isr(void)
 
 		signal_count = sys_sem_count_get(&simple_sem);
 		zassert_true(signal_count == (i + 1),
-			     "signal count missmatch Expected %d, got %d",
+			     "signal count mismatch Expected %d, got %d",
 			     (i + 1), signal_count);
 	}
 
@@ -186,7 +186,7 @@ void test_simple_sem_from_task(void)
 
 		signal_count = sys_sem_count_get(&simple_sem);
 		zassert_true(signal_count == (i + 1),
-			     "signal count missmatch Expected %d, got %d",
+			     "signal count mismatch Expected %d, got %d",
 			     (i + 1), signal_count);
 	}
 
@@ -208,7 +208,7 @@ void test_sem_take_no_wait(void)
 
 		signal_count = sys_sem_count_get(&simple_sem);
 		zassert_true(signal_count == i,
-			     "signal count missmatch Expected %d, got %d",
+			     "signal count mismatch Expected %d, got %d",
 			     i, signal_count);
 	}
 
@@ -231,7 +231,7 @@ void test_sem_take_no_wait_fails(void)
 
 		signal_count = sys_sem_count_get(&simple_sem);
 		zassert_true(signal_count == 0U,
-			     "signal count missmatch Expected 0, got %d",
+			     "signal count mismatch Expected 0, got %d",
 			     signal_count);
 	}
 
@@ -276,6 +276,8 @@ void test_sem_take_timeout(void)
 	ret_value = sys_sem_take(&simple_sem, SEM_TIMEOUT);
 	zassert_true(ret_value == 0,
 		     "sys_sem_take failed when its shouldn't have");
+
+	k_thread_join(&sem_tid, K_FOREVER);
 }
 
 /**
@@ -300,6 +302,8 @@ void test_sem_take_timeout_forever(void)
 	ret_value = sys_sem_take(&simple_sem, K_FOREVER);
 	zassert_true(ret_value == 0,
 		     "sys_sem_take failed when its shouldn't have");
+
+	k_thread_join(&sem_tid, K_FOREVER);
 }
 
 /**
@@ -318,6 +322,8 @@ void test_sem_take_timeout_isr(void)
 	ret_value = sys_sem_take(&simple_sem, SEM_TIMEOUT);
 	zassert_true(ret_value == 0,
 		     "sys_sem_take failed when its shouldn't have");
+
+	k_thread_join(&sem_tid, K_FOREVER);
 }
 
 /**
@@ -418,6 +424,9 @@ void test_sem_take_multiple(void)
 	zassert_true(signal_count == 1U,
 		     "low priority thread didn't get executed");
 
+	k_thread_join(&sem_tid, K_FOREVER);
+	k_thread_join(&sem_tid_1, K_FOREVER);
+	k_thread_join(&sem_tid_2, K_FOREVER);
 }
 
 /**
@@ -435,7 +444,7 @@ void test_sem_give_take_from_isr(void)
 
 		signal_count = sys_sem_count_get(&simple_sem);
 		zassert_true(signal_count == i + 1,
-			     "signal count missmatch Expected %d, got %d",
+			     "signal count mismatch Expected %d, got %d",
 			     i + 1, signal_count);
 	}
 
@@ -445,7 +454,7 @@ void test_sem_give_take_from_isr(void)
 
 		signal_count = sys_sem_count_get(&simple_sem);
 		zassert_true(signal_count == (i - 1),
-			     "signal count missmatch Expected %d, got %d",
+			     "signal count mismatch Expected %d, got %d",
 			     (i - 1), signal_count);
 	}
 }
@@ -468,7 +477,7 @@ void test_sem_give_limit(void)
 
 		signal_count = sys_sem_count_get(&simple_sem);
 		zassert_true(signal_count == i + 1,
-			     "signal count missmatch Expected %d, got %d",
+			     "signal count mismatch Expected %d, got %d",
 			     i + 1, signal_count);
 	}
 
@@ -477,14 +486,14 @@ void test_sem_give_limit(void)
 		if (ret_value == -EAGAIN) {
 			signal_count = sys_sem_count_get(&simple_sem);
 			zassert_true(signal_count == SEM_MAX_VAL,
-				"signal count missmatch Expected %d, got %d",
+				"signal count mismatch Expected %d, got %d",
 				SEM_MAX_VAL, signal_count);
 
 			sys_sem_take(&simple_sem, K_FOREVER);
 		} else if (ret_value == 0) {
 			signal_count = sys_sem_count_get(&simple_sem);
 			zassert_true(signal_count == SEM_MAX_VAL,
-				"signal count missmatch Expected %d, got %d",
+				"signal count mismatch Expected %d, got %d",
 				SEM_MAX_VAL, signal_count);
 		}
 	} while (ret_value == -EAGAIN);
@@ -537,15 +546,19 @@ void test_sem_multiple_threads_wait(void)
 
 		signal_count = sys_sem_count_get(&simple_sem);
 		zassert_true(signal_count == 0U,
-			     "signal count missmatch Expected 0, got %d",
+			     "signal count mismatch Expected 0, got %d",
 			     signal_count);
 
 		signal_count = sys_sem_count_get(&multiple_thread_sem);
 		zassert_true(signal_count == 0U,
-			     "signal count missmatch Expected 0, got %d",
+			     "signal count mismatch Expected 0, got %d",
 			     signal_count);
 
 		repeat_count++;
+
+		for (int i = 0; i < TOTAL_THREADS_WAITING; i++) {
+			k_thread_join(&multiple_tid[i], K_FOREVER);
+		}
 	} while (repeat_count < 2);
 }
 

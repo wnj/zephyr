@@ -6,11 +6,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr.h>
-#include <device.h>
-#include <init.h>
-#include <sys/util.h>
-#include <sys/byteorder.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/device.h>
+#include <zephyr/init.h>
+#include <zephyr/sys/util.h>
+#include <zephyr/sys/byteorder.h>
 
 #include <errno.h>
 #include <stddef.h>
@@ -24,9 +24,9 @@
 #include "soc.h"
 #include "cmdline.h" /* native_posix command line options header */
 
-#include <bluetooth/bluetooth.h>
-#include <bluetooth/hci.h>
-#include <drivers/bluetooth/hci_driver.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/drivers/bluetooth/hci_driver.h>
 
 #define BT_DBG_ENABLED IS_ENABLED(CONFIG_BT_DEBUG_HCI_DRIVER)
 #define LOG_MODULE_NAME bt_driver
@@ -58,9 +58,18 @@ static int bt_dev_index = -1;
 
 static struct net_buf *get_rx(const uint8_t *buf)
 {
+	bool discardable = false;
+	k_timeout_t timeout = K_FOREVER;
+
 	switch (buf[0]) {
 	case H4_EVT:
-		return bt_buf_get_evt(buf[1], false, K_FOREVER);
+		if (buf[1] == BT_HCI_EVT_LE_META_EVENT &&
+		    (buf[3] == BT_HCI_EVT_LE_ADVERTISING_REPORT)) {
+			discardable = true;
+			timeout = K_NO_WAIT;
+		}
+
+		return bt_buf_get_evt(buf[1], discardable, timeout);
 	case H4_ACL:
 		return bt_buf_get_rx(BT_BUF_ACL_IN, K_FOREVER);
 	case H4_ISO:
@@ -93,10 +102,12 @@ static void rx_thread(void *p1, void *p2, void *p3)
 	while (1) {
 		static uint8_t frame[512];
 		struct net_buf *buf;
+		size_t buf_tailroom;
+		size_t buf_add_len;
 		ssize_t len;
 
 		if (!uc_ready()) {
-			k_sleep(K_MSEC(20));
+			k_sleep(K_MSEC(1));
 			continue;
 		}
 
@@ -116,7 +127,21 @@ static void rx_thread(void *p1, void *p2, void *p3)
 		}
 
 		buf = get_rx(frame);
-		net_buf_add_mem(buf, &frame[1], len - 1);
+		if (!buf) {
+			BT_DBG("Discard adv report due to insufficient buf");
+			continue;
+		}
+
+		buf_tailroom = net_buf_tailroom(buf);
+		buf_add_len = len - 1;
+		if (buf_tailroom < buf_add_len) {
+			BT_ERR("Not enough space in buffer %zu/%zu",
+			       buf_add_len, buf_tailroom);
+			net_buf_unref(buf);
+			continue;
+		}
+
+		net_buf_add_mem(buf, &frame[1], buf_add_len);
 
 		BT_DBG("Calling bt_recv(%p)", buf);
 

@@ -1,17 +1,46 @@
 # SPDX-License-Identifier: Apache-2.0
 
-if(NOT CONFIG_LOG_MINIMAL)
+if(NOT CONFIG_LOG_MODE_MINIMAL)
   zephyr_sources_ifdef(
     CONFIG_LOG
-    log_list.c
     log_core.c
+    log_mgmt.c
     log_msg.c
     log_output.c
   )
 
   zephyr_sources_ifdef(
+    CONFIG_LOG_OUTPUT
+    log_output.c
+  )
+
+  # Determine if __auto_type is supported. If not then runtime approach must always
+  # be used.
+  # Supported by:
+  # - C++ (auto)
+  # - GCC 4.9.0 https://gcc.gnu.org/gcc-4.9/changes.html
+  # - Clang 3.8
+  if (NOT CONFIG_LOG_ALWAYS_RUNTIME)
+    if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+      if(CMAKE_C_COMPILER_VERSION VERSION_LESS "3.8.0")
+        message(WARNING "Compiler version requires CONFIG_LOG_ALWAYS_RUNTIME to be set")
+      endif()
+    endif()
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+      if(CMAKE_C_COMPILER_VERSION VERSION_LESS "4.9.0")
+        message(WARNING "Compiler version requires CONFIG_LOG_ALWAYS_RUNTIME to be set")
+      endif()
+    endif()
+  endif()
+
+  zephyr_sources_ifdef(
     CONFIG_LOG_BACKEND_UART
     log_backend_uart.c
+  )
+
+  zephyr_sources_ifdef(
+    CONFIG_LOG_BACKEND_FS
+    log_backend_fs.c
   )
 
   zephyr_sources_ifdef(
@@ -50,8 +79,18 @@ if(NOT CONFIG_LOG_MINIMAL)
   )
 
   zephyr_sources_ifdef(
-    CONFIG_LOG_BACKEND_RB
-    log_backend_rb.c
+    CONFIG_LOG_BACKEND_ADSP
+    log_backend_adsp.c
+    )
+
+  zephyr_sources_ifdef(
+    CONFIG_LOG_BACKEND_ADSP_HDA
+    log_backend_adsp_hda.c
+  )
+
+  zephyr_sources_ifdef(
+    CONFIG_LOG_BACKEND_EFI_CONSOLE
+    log_backend_efi_console.c
   )
 
   if(CONFIG_LOG_BACKEND_SPINEL)
@@ -64,6 +103,15 @@ if(NOT CONFIG_LOG_MINIMAL)
     CONFIG_LOG_BACKEND_SPINEL
     log_backend_spinel.c
   )
+
+  zephyr_sources_ifdef(
+    CONFIG_LOG_FRONTEND_DICT_UART
+    log_frontend_dict_uart.c
+  )
+
+  if(CONFIG_LOG_DICTIONARY_SUPPORT)
+    zephyr_sources(log_output_dict.c)
+  endif()
 
 else()
   zephyr_sources(log_minimal.c)

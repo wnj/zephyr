@@ -14,25 +14,25 @@
 #define LOG_MODULE_NAME slip
 #define LOG_LEVEL CONFIG_SLIP_LOG_LEVEL
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
 #include <stdio.h>
 
-#include <kernel.h>
+#include <zephyr/kernel.h>
 
 #include <stdbool.h>
 #include <errno.h>
 #include <stddef.h>
-#include <sys/util.h>
-#include <net/ethernet.h>
-#include <net/buf.h>
-#include <net/net_pkt.h>
-#include <net/net_if.h>
-#include <net/net_core.h>
-#include <net/dummy.h>
-#include <drivers/console/uart_pipe.h>
-#include <random/rand32.h>
+#include <zephyr/sys/util.h>
+#include <zephyr/net/ethernet.h>
+#include <zephyr/net/buf.h>
+#include <zephyr/net/net_pkt.h>
+#include <zephyr/net/net_if.h>
+#include <zephyr/net/net_core.h>
+#include <zephyr/net/dummy.h>
+#include <zephyr/drivers/uart_pipe.h>
+#include <zephyr/random/rand32.h>
 
 #define SLIP_END     0300
 #define SLIP_ESC     0333
@@ -457,7 +457,7 @@ static const struct ethernet_api slip_if_api = {
 #define _SLIP_MTU 1500
 
 ETH_NET_DEVICE_INIT(slip, CONFIG_SLIP_DRV_NAME,
-		    slip_init, device_pm_control_nop,
+		    slip_init, NULL,
 		    &slip_context_data, NULL,
 		    CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 		    &slip_if_api, _SLIP_MTU);
@@ -473,7 +473,7 @@ static const struct dummy_api slip_if_api = {
 #define _SLIP_L2_CTX_TYPE NET_L2_GET_CTX_TYPE(DUMMY_L2)
 #define _SLIP_MTU 576
 
-NET_DEVICE_INIT(slip, CONFIG_SLIP_DRV_NAME, slip_init, device_pm_control_nop,
+NET_DEVICE_INIT(slip, CONFIG_SLIP_DRV_NAME, slip_init, NULL,
 		&slip_context_data, NULL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 		&slip_if_api, _SLIP_L2_LAYER, _SLIP_L2_CTX_TYPE, _SLIP_MTU);
 #endif

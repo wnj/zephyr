@@ -2,7 +2,9 @@ description: Kinetis pinmux node
 
 compatible: "nxp,kinetis-pinmux"
 
-include: base.yaml
+include:
+  - name: base.yaml
+  - name: pincfg-node.yaml
 
 properties:
     reg:
@@ -10,7 +12,3 @@ properties:
 
     clocks:
       required: true
-
-pinmux-cells:
-  - pin
-  - function

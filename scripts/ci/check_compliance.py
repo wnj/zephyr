@@ -118,9 +118,9 @@ class ComplianceTest:
         test code.
         """
         if self.case.result:
-            msg += "\n\nFailures before error: " + self.case.result._elem.text
+            msg += "\n\nFailures before error: " + self.case.result[0]._elem.text
 
-        self.case.result = Error(msg, "error")
+        self.case.result = [Error(msg, "error")]
 
         raise EndTest
 
@@ -136,7 +136,7 @@ class ComplianceTest:
         test code.
         """
         if self.case.result:
-            msg += "\n\nFailures before skip: " + self.case.result._elem.text
+            msg += "\n\nFailures before skip: " + self.case.result[0]._elem.text
 
         self.case.result = Skipped(msg, "skipped")
 
@@ -149,11 +149,11 @@ class ComplianceTest:
         """
         if not self.case.result:
             # First reported failure
-            self.case.result = Failure(self.name + " issues", "failure")
-            self.case.result._elem.text = msg.rstrip()
+            self.case.result = [Failure(self.name + " issues", "failure")]
+            self.case.result[0]._elem.text = msg.rstrip()
         else:
             # If there are multiple Failures, concatenate their messages
-            self.case.result._elem.text += "\n\n" + msg.rstrip()
+            self.case.result[0]._elem.text += "\n\n" + msg.rstrip()
 
     def add_info(self, msg):
         """
@@ -192,7 +192,7 @@ class CheckPatch(ComplianceTest):
 
     """
     name = "checkpatch"
-    doc = "See https://docs.zephyrproject.org/latest/contribute/#coding-style for more details."
+    doc = "See https://docs.zephyrproject.org/latest/contribute/guidelines.html#coding-style for more details."
     path_hint = "<git-top>"
 
     def run(self):
@@ -213,29 +213,28 @@ class CheckPatch(ComplianceTest):
 
         except subprocess.CalledProcessError as ex:
             output = ex.output.decode("utf-8")
-            if re.search("[1-9][0-9]* errors,", output):
-                self.add_failure(output)
-            else:
-                # No errors found, but warnings. Show them.
-                self.add_info(output)
+            self.add_failure(output)
 
 
 class KconfigCheck(ComplianceTest):
     """
     Checks is we are introducing any new warnings/errors with Kconfig,
-    for example using undefiend Kconfig variables.
+    for example using undefined Kconfig variables.
     """
     name = "Kconfig"
     doc = "See https://docs.zephyrproject.org/latest/guides/kconfig/index.html for more details."
     path_hint = ZEPHYR_BASE
 
-    def run(self):
+    def run(self, full=True):
         kconf = self.parse_kconfig()
 
         self.check_top_menu_not_too_long(kconf)
         self.check_no_pointless_menuconfigs(kconf)
         self.check_no_undef_within_kconfig(kconf)
-        self.check_no_undef_outside_kconfig(kconf)
+        self.check_no_redefined_in_defconfig(kconf)
+        self.check_no_enable_in_boolean_prompt(kconf)
+        if full:
+            self.check_no_undef_outside_kconfig(kconf)
 
     def get_modules(self, modules_file):
         """
@@ -256,27 +255,40 @@ class KconfigCheck(ComplianceTest):
         except subprocess.CalledProcessError as ex:
             self.error(ex.output)
 
-    def write_kconfig_soc(self):
+        modules_dir = ZEPHYR_BASE + '/modules'
+        modules = [name for name in os.listdir(modules_dir) if
+                   os.path.exists(os.path.join(modules_dir, name, 'Kconfig'))]
+
+        with open(modules_file, 'r') as fp_module_file:
+            content = fp_module_file.read()
+
+        with open(modules_file, 'w') as fp_module_file:
+            for module in modules:
+                fp_module_file.write("ZEPHYR_{}_KCONFIG = {}\n".format(
+                    re.sub('[^a-zA-Z0-9]', '_', module).upper(),
+                    modules_dir + '/' + module + '/Kconfig'
+                ))
+            fp_module_file.write(content)
+
+    def get_kconfig_dts(self, kconfig_dts_file):
         """
-        Write KConfig soc files to be sourced during Kconfig parsing
+        Generate the Kconfig.dts using dts/bindings as the source.
+
+        This is needed to complete Kconfig compliance tests.
 
         """
-
-        soc_defconfig_file = os.path.join(tempfile.gettempdir(), "Kconfig.soc.defconfig")
-        soc_file = os.path.join(tempfile.gettempdir(), "Kconfig.soc")
-        soc_arch_file = os.path.join(tempfile.gettempdir(), "Kconfig.soc.arch")
+        # Invoke the script directly using the Python executable since this is
+        # not a module nor a pip-installed Python utility
+        zephyr_drv_kconfig_path = os.path.join(ZEPHYR_BASE, "scripts", "dts",
+			                       "gen_driver_kconfig_dts.py")
+        binding_path = os.path.join(ZEPHYR_BASE, "dts", "bindings")
+        cmd = [sys.executable, zephyr_drv_kconfig_path,
+               '--kconfig-out', kconfig_dts_file, '--bindings', binding_path]
         try:
-            with open(soc_defconfig_file, 'w', encoding="utf-8") as fp:
-                fp.write(f'osource "{ZEPHYR_BASE}/soc/$(ARCH)/*/Kconfig.defconfig"\n')
-
-            with open(soc_file, 'w', encoding="utf-8") as fp:
-                fp.write(f'osource "{ZEPHYR_BASE}/soc/$(ARCH)/*/Kconfig.soc"\n')
-
-            with open(soc_arch_file, 'w', encoding="utf-8") as fp:
-                fp.write(f'osource "{ZEPHYR_BASE}/soc/$(ARCH)/Kconfig"\n\
-osource "{ZEPHYR_BASE}/soc/$(ARCH)/*/Kconfig"\n')
-        except IOError as ex:
+            _ = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as ex:
             self.error(ex.output)
+
 
     def parse_kconfig(self):
         """
@@ -308,6 +320,7 @@ osource "{ZEPHYR_BASE}/soc/$(ARCH)/*/Kconfig"\n')
         os.environ["ARCH"] = "*"
         os.environ["KCONFIG_BINARY_DIR"] = tempfile.gettempdir()
         os.environ['DEVICETREE_CONF'] = "dummy"
+        os.environ['TOOLCHAIN_HAS_NEWLIB'] = "y"
 
         # Older name for DEVICETREE_CONF, for compatibility with older Zephyr
         # versions that don't have the renaming
@@ -316,8 +329,8 @@ osource "{ZEPHYR_BASE}/soc/$(ARCH)/*/Kconfig"\n')
         # For multi repo support
         self.get_modules(os.path.join(tempfile.gettempdir(), "Kconfig.modules"))
 
-        # For list of SOC_ROOT support
-        self.write_kconfig_soc()
+        # For Kconfig.dts support
+        self.get_kconfig_dts(os.path.join(tempfile.gettempdir(), "Kconfig.dts"))
 
         # Tells Kconfiglib to generate warnings for all references to undefined
         # symbols within Kconfig files
@@ -355,6 +368,42 @@ Expected no more than {} potentially visible items (items with prompts) in the
 top-level Kconfig menu, found {} items. If you're deliberately adding new
 entries, then bump the 'max_top_items' variable in {}.
 """.format(max_top_items, n_top_items, __file__))
+
+    def check_no_redefined_in_defconfig(self, kconf):
+        # Checks that no symbols are (re)defined in defconfigs.
+
+        for node in kconf.node_iter():
+            if "defconfig" in node.filename and (node.prompt or node.help):
+                self.add_failure(f"""
+Kconfig node '{node.item.name}' found with prompt or help in {node.filename}.
+Options must not be defined in defconfig files.
+""")
+                continue
+
+    def check_no_enable_in_boolean_prompt(self, kconf):
+        # Checks that boolean's prompt does not start with "Enable...".
+
+        for node in kconf.node_iter():
+            # skip Kconfig nodes not in-tree (will present an absolute path)
+            if os.path.isabs(node.filename):
+                continue
+
+            # 'kconfiglib' is global
+            # pylint: disable=undefined-variable
+
+            # only process boolean symbols with a prompt
+            if (not isinstance(node.item, kconfiglib.Symbol) or
+                node.item.type != kconfiglib.BOOL or
+                not node.prompt or
+                not node.prompt[0]):
+                continue
+
+            if re.match(r"^[Ee]nable.*", node.prompt[0]):
+                self.add_failure(f"""
+Boolean option '{node.item.name}' prompt must not start with 'Enable...'. Please
+check Kconfig guidelines.
+""")
+                continue
 
     def check_no_pointless_menuconfigs(self, kconf):
         # Checks that there are no pointless 'menuconfig' symbols without
@@ -434,7 +483,7 @@ https://docs.zephyrproject.org/latest/guides/kconfig/tips.html#menuconfig-symbol
         # Skip doc/releases, which often references removed symbols
         grep_stdout = git("grep", "--line-number", "-I", "--null",
                           "--perl-regexp", regex, "--", ":!/doc/releases",
-                          cwd=ZEPHYR_BASE)
+                          cwd=Path(GIT_TOP))
 
         # splitlines() supports various line terminators
         for grep_line in grep_stdout.splitlines():
@@ -502,6 +551,9 @@ def get_defined_syms(kconf):
 UNDEF_KCONFIG_WHITELIST = {
     "ALSO_MISSING",
     "APP_LINK_WITH_",
+    "ARMCLANG_STD_LIBC",  # The ARMCLANG_STD_LIBC is defined in the toolchain
+                          # Kconfig which is sourced based on Zephyr toolchain
+			  # variant and therefore not visible to compliance.
     "CDC_ACM_PORT_NAME_",
     "CLOCK_STM32_SYSCLK_SRC_",
     "CMU",
@@ -519,7 +571,6 @@ UNDEF_KCONFIG_WHITELIST = {
     "FOO_LOG_LEVEL",
     "FOO_SETTING_1",
     "FOO_SETTING_2",
-    "LIS2DW12_INT_PIN",
     "LSM6DSO_INT_PIN",
     "MISSING",
     "MODULES",
@@ -532,6 +583,9 @@ UNDEF_KCONFIG_WHITELIST = {
     "REG1",
     "REG2",
     "SAMPLE_MODULE_LOG_LEVEL",  # Used as an example in samples/subsys/logging
+    "SAMPLE_MODULE_LOG_LEVEL_DBG",  # Used in tests/subsys/logging/log_api
+    "LOG_BACKEND_MOCK_OUTPUT_DEFAULT", #Referenced in tests/subsys/logging/log_syst
+    "LOG_BACKEND_MOCK_OUTPUT_SYST", #Referenced in testcase.yaml of log_syst test
     "SEL",
     "SHIFT",
     "SOC_WATCH",  # Issue 13749
@@ -542,12 +596,32 @@ UNDEF_KCONFIG_WHITELIST = {
     "SRAM2",  # Referenced in a comment in samples/application_development
     "STACK_SIZE",  # Used as an example in the Kconfig docs
     "STD_CPP",  # Referenced in CMake comment
+    "TAGOIO_HTTP_POST_LOG_LEVEL",  # Used as in samples/net/cloud/tagoio
     "TEST1",
     "TYPE_BOOLEAN",
     "USB_CONSOLE",
     "USE_STDC_",
     "WHATEVER",
+    "EXTRA_FIRMWARE_DIR", # Linux, in boards/xtensa/intel_adsp_cavs25/doc
+    "HUGETLBFS",          # Linux, in boards/xtensa/intel_adsp_cavs25/doc
+    "MODVERSIONS",        # Linux, in boards/xtensa/intel_adsp_cavs25/doc
+    "SECURITY_LOADPIN",   # Linux, in boards/xtensa/intel_adsp_cavs25/doc
+    "ZEPHYR_TRY_MASS_ERASE", # MCUBoot setting described in sysbuild documentation
 }
+
+class KconfigBasicCheck(KconfigCheck, ComplianceTest):
+    """
+    Checks is we are introducing any new warnings/errors with Kconfig,
+    for example using undefined Kconfig variables.
+    This runs the basic Kconfig test, which is checking only for undefined
+    references inside the Kconfig tree.
+    """
+    name = "KconfigBasic"
+    doc = "See https://docs.zephyrproject.org/latest/guides/kconfig/index.html for more details."
+    path_hint = ZEPHYR_BASE
+
+    def run(self):
+        super().run(full=False)
 
 
 class Codeowners(ComplianceTest):
@@ -567,7 +641,7 @@ class Codeowners(ComplianceTest):
         """
 
         # TODO: filter out files not in "git ls-files" (e.g.,
-        # sanity-out) _if_ the overhead isn't too high for a clean tree.
+        # twister-out) _if_ the overhead isn't too high for a clean tree.
         #
         # pathlib.match() doesn't support **, so it looks like we can't
         # recursively glob the output of ls-files directly, only real
@@ -687,7 +761,7 @@ class Nits(ComplianceTest):
     already covered by e.g. checkpatch.pl and pylint.
     """
     name = "Nits"
-    doc = "See https://docs.zephyrproject.org/latest/contribute/#coding-style for more details."
+    doc = "See https://docs.zephyrproject.org/latest/contribute/guidelines.html#coding-style for more details."
     path_hint = "<git-top>"
 
     def run(self):
@@ -785,7 +859,7 @@ class GitLint(ComplianceTest):
 
     """
     name = "Gitlint"
-    doc = "See https://docs.zephyrproject.org/latest/contribute/#commit-guidelines for more details"
+    doc = "See https://docs.zephyrproject.org/latest/contribute/guidelines.html#commit-guidelines for more details"
     path_hint = "<git-top>"
 
     def run(self):
@@ -852,15 +926,20 @@ class PyLint(ComplianceTest):
 
 def filter_py(root, fnames):
     # PyLint check helper. Returns all Python script filenames among the
-    # filenames in 'fnames', relative to directory 'root'. Uses the
-    # python-magic library, so that we can detect Python files that
-    # don't end in .py as well. python-magic is a frontend to libmagic,
-    # which is also used by 'file'.
+    # filenames in 'fnames', relative to directory 'root'.
+    #
+    # Uses the python-magic library, so that we can detect Python
+    # files that don't end in .py as well. python-magic is a frontend
+    # to libmagic, which is also used by 'file'.
+    #
+    # The extra os.path.isfile() is necessary because git includes
+    # submodule directories in its output.
 
     return [fname for fname in fnames
-            if fname.endswith(".py") or
-               magic.from_file(os.path.join(root, fname),
-                               mime=True) == "text/x-python"]
+            if os.path.isfile(os.path.join(root, fname)) and
+            (fname.endswith(".py") or
+             magic.from_file(os.path.join(root, fname),
+                             mime=True) == "text/x-python")]
 
 
 class Identity(ComplianceTest):
@@ -868,7 +947,7 @@ class Identity(ComplianceTest):
     Checks if Emails of author and signed-off messages are consistent.
     """
     name = "Identity"
-    doc = "See https://docs.zephyrproject.org/latest/contribute/#commit-guidelines for more details"
+    doc = "See https://docs.zephyrproject.org/latest/contribute/guidelines.html#commit-guidelines for more details"
     # git rev-list and git log don't depend on the current (sub)directory
     # unless explicited
     path_hint = "<git-top>"
@@ -1041,8 +1120,8 @@ def _main(args):
 
     for case in suite:
         if case.result:
-            if case.result.type == 'skipped':
-                logging.warning("Skipped %s, %s", case.name, case.result.message)
+            if case.result[0].type == 'skipped':
+                logging.warning("Skipped %s, %s", case.name, case.result[0].message)
             else:
                 failed_cases.append(case)
         else:
@@ -1056,14 +1135,14 @@ def _main(args):
         for case in failed_cases:
             # not clear why junitxml doesn't clearly expose the most
             # important part of its underlying etree.Element
-            errmsg = case.result._elem.text
+            errmsg = case.result[0]._elem.text
             logging.error("Test %s failed: %s", case.name,
-                          errmsg.strip() if errmsg else case.result.message)
+                          errmsg.strip() if errmsg else case.result[0].message)
 
             with open(f"{case.name}.txt", "w") as f:
                 docs = name2doc.get(case.name)
                 f.write(f"{docs}\n\n")
-                f.write(errmsg.strip() if errmsg else case.result.message)
+                f.write(errmsg.strip() if errmsg else case.result[0].message)
 
     print("\nComplete results in " + args.output)
     return n_fails
@@ -1077,7 +1156,8 @@ def main():
     except BaseException:
         # Catch BaseException instead of Exception to include stuff like
         # SystemExit (raised by sys.exit())
-        print(format(__file__, traceback.format_exc()))
+        print("Python exception in `{}`:\n\n"
+              "```\n{}\n```".format(__file__, traceback.format_exc()))
 
         raise
 

@@ -12,26 +12,26 @@
 #define LOG_MODULE_NAME eth_smsc911x
 #define LOG_LEVEL CONFIG_ETHERNET_LOG_LEVEL
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
 #include <soc.h>
-#include <device.h>
+#include <zephyr/device.h>
 #include <errno.h>
-#include <init.h>
-#include <kernel.h>
-#include <sys/__assert.h>
-#include <net/net_core.h>
-#include <net/net_pkt.h>
+#include <zephyr/init.h>
+#include <zephyr/kernel.h>
+#include <zephyr/sys/__assert.h>
+#include <zephyr/net/net_core.h>
+#include <zephyr/net/net_pkt.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/sys_io.h>
-#include <net/ethernet.h>
+#include <zephyr/sys/sys_io.h>
+#include <zephyr/net/ethernet.h>
 #include "ethernet/eth_stats.h"
 
 #ifdef CONFIG_SHARED_IRQ
-#include <shared_irq.h>
+#include <zephyr/shared_irq.h>
 #endif
 
 #include "eth_smsc911x_priv.h"
@@ -658,13 +658,11 @@ done:
 
 /* Bindings to the platform */
 
-DEVICE_DECLARE(eth_smsc911x_0);
-
 int eth_init(const struct device *dev)
 {
 	IRQ_CONNECT(DT_INST_IRQN(0),
 		    DT_INST_IRQ(0, priority),
-		    eth_smsc911x_isr, DEVICE_GET(eth_smsc911x_0), 0);
+		    eth_smsc911x_isr, DEVICE_DT_INST_GET(0), 0);
 
 	int ret = smsc_init();
 
@@ -680,7 +678,7 @@ int eth_init(const struct device *dev)
 
 static struct eth_context eth_0_context;
 
-ETH_NET_DEVICE_INIT(eth_smsc911x_0, "smsc911x_0",
-		eth_init, device_pm_control_nop, &eth_0_context,
+ETH_NET_DEVICE_DT_INST_DEFINE(0,
+		eth_init, NULL, &eth_0_context,
 		NULL /*&eth_config_0*/, CONFIG_ETH_INIT_PRIORITY, &api_funcs,
 		NET_ETH_MTU /*MTU*/);

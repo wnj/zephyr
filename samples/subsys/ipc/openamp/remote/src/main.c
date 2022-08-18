@@ -6,10 +6,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr.h>
-#include <drivers/ipm.h>
-#include <sys/printk.h>
-#include <device.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/drivers/ipm.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/device.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -74,7 +74,6 @@ static uint32_t virtio_get_features(struct virtio_device *vdev)
 static void virtio_notify(struct virtqueue *vq)
 {
 #if defined(CONFIG_SOC_MPS2_AN521) || \
-	defined(CONFIG_SOC_V2M_MUSCA_A) || \
 	defined(CONFIG_SOC_V2M_MUSCA_B1)
 	uint32_t current_core = sse_200_platform_get_cpu_id();
 
@@ -177,9 +176,9 @@ void app_task(void *arg1, void *arg2, void *arg3)
 	}
 
 	/* setup IPM */
-	ipm_handle = device_get_binding(CONFIG_OPENAMP_IPC_DEV_NAME);
-	if (ipm_handle == NULL) {
-		printk("device_get_binding failed to find device\n");
+	ipm_handle = DEVICE_DT_GET(DT_CHOSEN(zephyr_ipc));
+	if (!device_is_ready(ipm_handle)) {
+		printk("IPM device is not ready\n");
 		return;
 	}
 

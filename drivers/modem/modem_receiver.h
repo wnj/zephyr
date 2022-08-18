@@ -14,8 +14,8 @@
 #ifndef ZEPHYR_INCLUDE_DRIVERS_MODEM_MODEM_RECEIVER_H_
 #define ZEPHYR_INCLUDE_DRIVERS_MODEM_MODEM_RECEIVER_H_
 
-#include <kernel.h>
-#include <sys/ring_buffer.h>
+#include <zephyr/kernel.h>
+#include <zephyr/sys/ring_buffer.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,7 +37,7 @@ struct mdm_receiver_context {
 	char *data_imsi;
 #endif
 	char *data_iccid;
-	int   data_rssi;
+	int  *data_rssi;
 };
 
 /**
@@ -80,14 +80,14 @@ int mdm_receiver_send(struct mdm_receiver_context *ctx,
  * @note   Acquires receivers device, and prepares the context to be used.
  *
  * @param  *ctx: receiver context to register.
- * @param  *uart_dev_name: communication device for the receiver context.
+ * @param  *uart_dev: communication device for the receiver context.
  * @param  *buf: rx buffer to use for received data.
  * @param  size: rx buffer size.
  *
  * @retval 0 if ok, < 0 if error.
  */
 int mdm_receiver_register(struct mdm_receiver_context *ctx,
-			  const char *uart_dev_name,
+			  const struct device *uart_dev,
 			  uint8_t *buf, size_t size);
 
 int mdm_receiver_sleep(struct mdm_receiver_context *ctx);

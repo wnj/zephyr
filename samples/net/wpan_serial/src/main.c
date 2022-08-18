@@ -12,17 +12,23 @@
  * with popular Contiki-based native border routers.
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(wpan_serial, CONFIG_USB_DEVICE_LOG_LEVEL);
 
-#include <drivers/uart.h>
-#include <zephyr.h>
-#include <usb/usb_device.h>
-#include <random/rand32.h>
+#include <zephyr/drivers/uart.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/usb/usb_device.h>
+#include <zephyr/random/rand32.h>
 
-#include <net/buf.h>
+#include <zephyr/net/buf.h>
 #include <net_private.h>
-#include <net/ieee802154_radio.h>
+#include <zephyr/net/ieee802154_radio.h>
+
+#if IS_ENABLED(CONFIG_NET_TC_THREAD_COOPERATIVE)
+#define THREAD_PRIORITY K_PRIO_COOP(CONFIG_NUM_COOP_PRIORITIES - 1)
+#else
+#define THREAD_PRIORITY K_PRIO_PREEMPT(8)
+#endif
 
 #define SLIP_END     0300
 #define SLIP_ESC     0333
@@ -50,7 +56,8 @@ static uint8_t slip_buf[1 + 2 * CONFIG_NET_BUF_DATA_SIZE];
 
 /* ieee802.15.4 device */
 static struct ieee802154_radio_api *radio_api;
-static const struct device *ieee802154_dev;
+static const struct device *const ieee802154_dev =
+	DEVICE_DT_GET(DT_CHOSEN(zephyr_ieee802154));
 uint8_t mac_addr[8];
 
 /* UART device */
@@ -414,7 +421,7 @@ static void init_rx_queue(void)
 	k_thread_create(&rx_thread_data, rx_stack,
 			K_THREAD_STACK_SIZEOF(rx_stack),
 			(k_thread_entry_t)rx_thread,
-			NULL, NULL, NULL, K_PRIO_COOP(8), 0, K_NO_WAIT);
+			NULL, NULL, NULL, THREAD_PRIORITY, 0, K_NO_WAIT);
 }
 
 static void init_tx_queue(void)
@@ -424,7 +431,7 @@ static void init_tx_queue(void)
 	k_thread_create(&tx_thread_data, tx_stack,
 			K_THREAD_STACK_SIZEOF(tx_stack),
 			(k_thread_entry_t)tx_thread,
-			NULL, NULL, NULL, K_PRIO_COOP(8), 0, K_NO_WAIT);
+			NULL, NULL, NULL, THREAD_PRIORITY, 0, K_NO_WAIT);
 }
 
 /**
@@ -450,9 +457,8 @@ static bool init_ieee802154(void)
 {
 	LOG_INF("Initialize ieee802.15.4");
 
-	ieee802154_dev = device_get_binding(CONFIG_NET_CONFIG_IEEE802154_DEV_NAME);
-	if (!ieee802154_dev) {
-		LOG_ERR("Cannot get ieee 802.15.4 device");
+	if (!device_is_ready(ieee802154_dev)) {
+		LOG_ERR("IEEE 802.15.4 device not ready");
 		return false;
 	}
 
@@ -514,6 +520,11 @@ int net_recv_data(struct net_if *iface, struct net_pkt *pkt)
 	return 0;
 }
 
+enum net_verdict ieee802154_radio_handle_ack(struct net_if *iface, struct net_pkt *pkt)
+{
+	return NET_CONTINUE;
+}
+
 void main(void)
 {
 	const struct device *dev;
@@ -522,9 +533,9 @@ void main(void)
 
 	LOG_INF("Starting wpan_serial application");
 
-	dev = device_get_binding("CDC_ACM_0");
-	if (!dev) {
-		LOG_ERR("CDC ACM device not found");
+	dev = DEVICE_DT_GET_ONE(zephyr_cdc_acm_uart);
+	if (!device_is_ready(dev)) {
+		LOG_ERR("CDC ACM device not ready");
 		return;
 	}
 
@@ -572,7 +583,7 @@ void main(void)
 	if (!init_ieee802154()) {
 		LOG_ERR("Unable to initialize ieee802154");
 		return;
-	};
+	}
 
 	uart_irq_callback_set(dev, interrupt_handler);
 

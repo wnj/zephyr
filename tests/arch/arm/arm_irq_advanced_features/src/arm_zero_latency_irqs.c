@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <ztest.h>
-#include <arch/cpu.h>
-#include <arch/arm/aarch32/cortex_m/cmsis.h>
-
-#if defined(CONFIG_ZERO_LATENCY_IRQS)
+#include <zephyr/ztest.h>
+#include <zephyr/arch/cpu.h>
+#include <zephyr/arch/arm/aarch32/cortex_m/cmsis.h>
 
 static volatile int test_flag;
 
@@ -19,8 +17,15 @@ void arm_zero_latency_isr_handler(const void *args)
 	test_flag = 1;
 }
 
-void test_arm_zero_latency_irqs(void)
+ZTEST(arm_irq_advanced_features, test_arm_zero_latency_irqs)
 {
+
+	if (!IS_ENABLED(CONFIG_ZERO_LATENCY_IRQS)) {
+		TC_PRINT("Skipped (Cortex-M Mainline only)\n");
+
+		return;
+	}
+
 	/* Determine an NVIC IRQ line that is not currently in use. */
 	int i, key;
 	int init_flag, post_flag;
@@ -98,12 +103,7 @@ void test_arm_zero_latency_irqs(void)
 
 	irq_unlock(key);
 }
-#else
-void test_arm_zero_latency_irqs(void)
-{
-	TC_PRINT("Skipped (Cortex-M Mainline only)\n");
-}
-#endif /* CONFIG_ZERO_LATENCY_IRQS */
+
 /**
  * @}
  */

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 zephyr_sources_ifdef(
-  CONFIG_OPENOCD_SUPPORT
-  openocd.c
+  CONFIG_DEBUG_THREAD_INFO
+  thread_info.c
   )
 
 zephyr_sources_ifdef(

@@ -122,7 +122,7 @@ class GdbStub(abc.ABC):
 
         def get_mem_region(addr):
             for r in self.mem_regions:
-                if r['start'] <= addr <= r['end']:
+                if r['start'] <= addr < r['end']:
                     return r
 
             return None
@@ -139,12 +139,13 @@ class GdbStub(abc.ABC):
         barray = b''
         r = get_mem_region(addr)
         while remaining > 0:
-            if addr > r['end']:
-                r = get_mem_region(addr)
-
             if r is None:
                 barray = None
                 break
+
+            if addr > r['end']:
+                r = get_mem_region(addr)
+                continue
 
             offset = addr - r['start']
             barray += r['data'][offset:offset+1]

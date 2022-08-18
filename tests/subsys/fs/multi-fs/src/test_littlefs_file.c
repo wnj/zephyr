@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <fs/fs.h>
+#include <zephyr/fs/fs.h>
 #include "test_common.h"
 #include "test_littlefs.h"
 #include "test_littlefs_priv.h"
@@ -14,6 +14,7 @@ static const char *test_str = "Hello world LITTLEFS";
 
 void test_littlefs_open(void)
 {
+	fs_file_t_init(&test_file);
 	zassert_true(test_file_open(&test_file, TEST_FILE_PATH) == TC_PASS,
 		NULL);
 }

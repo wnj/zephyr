@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Originally from the Galileo port in contiki
 # https://github.com/otcshare/contiki-x86
@@ -34,7 +34,7 @@ build() {
 
   ./bootstrap
   ./autogen.sh
-  ./configure --with-platform=efi --target=${TARGET_ARCH}
+  ./configure --with-platform=efi --target=${TARGET_ARCH} --disable-werror
 
   make -j${JOBS}
 

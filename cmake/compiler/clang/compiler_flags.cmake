@@ -13,17 +13,22 @@ check_set_compiler_property(PROPERTY hosted)
 # clang flags for coverage generation
 set_property(TARGET compiler PROPERTY coverage --coverage -fno-inline)
 
+# clang flag for colourful diagnostic messages
+set_compiler_property(PROPERTY diagnostic -fcolor-diagnostics)
+
 #######################################################
 # This section covers flags related to warning levels #
 #######################################################
 
 # clang option standard warning base in Zephyr
-set_compiler_property(PROPERTY warning_base
-                      -Wall
-                      -Wformat
-                      -Wformat-security
-                      -Wno-format-zero-length
-                      -Wno-main
+check_set_compiler_property(PROPERTY warning_base
+                            -Wall
+                            -Wformat
+                            -Wformat-security
+                            -Wno-format-zero-length
+                            -Wno-main
+                            -Wno-unused-but-set-variable
+                            -Wno-typedef-redefinition
 )
 
 check_set_compiler_property(APPEND PROPERTY warning_base -Wno-pointer-sign)

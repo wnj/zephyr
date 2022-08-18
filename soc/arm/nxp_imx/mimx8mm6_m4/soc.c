@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <device.h>
+#include <zephyr/device.h>
 #include <fsl_clock.h>
 #include <fsl_common.h>
 #include <fsl_rdc.h>
-#include <init.h>
-#include <kernel.h>
+#include <zephyr/init.h>
+#include <zephyr/kernel.h>
 #include <soc.h>
 
-#include <dt-bindings/rdc/imx_rdc.h>
+#include <zephyr/dt-bindings/rdc/imx_rdc.h>
 
 /* OSC/PLL is already initialized by ROM and Cortex-A53 (u-boot) */
 static void SOC_RdcInit(void)
@@ -27,11 +27,11 @@ static void SOC_RdcInit(void)
 	 * The M4 core is running at domain 1, enable clock gate for
 	 * Iomux to run at domain 1.
 	 */
-	CLOCK_EnableClock(kCLOCK_Iomux0);
-	CLOCK_EnableClock(kCLOCK_Iomux1);
-	CLOCK_EnableClock(kCLOCK_Iomux2);
-	CLOCK_EnableClock(kCLOCK_Iomux3);
-	CLOCK_EnableClock(kCLOCK_Iomux4);
+	CLOCK_EnableClock(kCLOCK_Iomux);
+	CLOCK_EnableClock(kCLOCK_Ipmux1);
+	CLOCK_EnableClock(kCLOCK_Ipmux2);
+	CLOCK_EnableClock(kCLOCK_Ipmux3);
+	CLOCK_EnableClock(kCLOCK_Ipmux4);
 
 	CLOCK_EnableClock(kCLOCK_Qspi);
 

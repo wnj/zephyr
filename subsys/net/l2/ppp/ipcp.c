@@ -5,14 +5,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(net_l2_ppp, CONFIG_NET_L2_PPP_LOG_LEVEL);
 
-#include <net/net_core.h>
-#include <net/net_pkt.h>
+#include <zephyr/net/net_core.h>
+#include <zephyr/net/net_pkt.h>
 
-#include <net/ppp.h>
-#include <net/dns_resolve.h>
+#include <zephyr/net/ppp.h>
+#include <zephyr/net/dns_resolve.h>
 
 #include "net_private.h"
 
@@ -147,6 +147,32 @@ struct ipcp_peer_option_data {
 	struct in_addr addr;
 };
 
+#if defined(CONFIG_NET_L2_PPP_OPTION_SERVE_DNS)
+static int ipcp_dns_address_parse(struct ppp_fsm *fsm, struct net_pkt *pkt,
+				  void *user_data)
+{
+	struct ipcp_peer_option_data *data = user_data;
+	int ret;
+
+	ret = net_pkt_read(pkt, &data->addr, sizeof(data->addr));
+	if (ret < 0) {
+		/* Should not happen, is the pkt corrupt? */
+		return -EMSGSIZE;
+	}
+
+	/* Request is zeros? Give our dns address in ConfNak */
+	if (data->addr.s_addr == INADDR_ANY) {
+		NET_DBG("[IPCP] zeroes rcvd as %s addr, sending NAK with our %s addr",
+			"DNS", "DNS");
+		return -EINVAL;
+	}
+
+	data->addr_present = true;
+
+	return 0;
+}
+#endif
+
 static int ipcp_ip_address_parse(struct ppp_fsm *fsm, struct net_pkt *pkt,
 				 void *user_data)
 {
@@ -159,6 +185,14 @@ static int ipcp_ip_address_parse(struct ppp_fsm *fsm, struct net_pkt *pkt,
 		return -EMSGSIZE;
 	}
 
+#if defined(CONFIG_NET_L2_PPP_OPTION_SERVE_IP)
+	/* Request is zeros? Give our IP address in ConfNak */
+	if (data->addr.s_addr == INADDR_ANY) {
+		NET_DBG("[IPCP] zeroes rcvd as %s addr, sending NAK with our %s addr",
+			"IP", "IP");
+		return -EINVAL;
+	}
+#endif
 	if (CONFIG_NET_L2_PPP_LOG_LEVEL >= LOG_LEVEL_DBG) {
 		char dst[INET_ADDRSTRLEN];
 		char *addr_str;
@@ -167,7 +201,7 @@ static int ipcp_ip_address_parse(struct ppp_fsm *fsm, struct net_pkt *pkt,
 					 sizeof(dst));
 
 		NET_DBG("[IPCP] Received peer address %s",
-			log_strdup(addr_str));
+			addr_str);
 	}
 
 	data->addr_present = true;
@@ -175,8 +209,61 @@ static int ipcp_ip_address_parse(struct ppp_fsm *fsm, struct net_pkt *pkt,
 	return 0;
 }
 
+#if defined(CONFIG_NET_L2_PPP_OPTION_SERVE_IP)
+static int ipcp_server_nak_ip_address(struct ppp_fsm *fsm,
+				      struct net_pkt *ret_pkt, void *user_data)
+{
+	struct ppp_context *ctx =
+		CONTAINER_OF(fsm, struct ppp_context, ipcp.fsm);
+
+	(void)net_pkt_write_u8(ret_pkt, IPCP_OPTION_IP_ADDRESS);
+	ipcp_add_ip_address(ctx, ret_pkt);
+
+	return 0;
+}
+#endif
+
+#if defined(CONFIG_NET_L2_PPP_OPTION_SERVE_DNS)
+static int ipcp_server_nak_dns1_address(struct ppp_fsm *fsm,
+					struct net_pkt *ret_pkt,
+					void *user_data)
+{
+	struct ppp_context *ctx =
+		CONTAINER_OF(fsm, struct ppp_context, ipcp.fsm);
+
+	(void)net_pkt_write_u8(ret_pkt, IPCP_OPTION_DNS1);
+	ipcp_add_dns1(ctx, ret_pkt);
+
+	return 0;
+}
+
+static int ipcp_server_nak_dns2_address(struct ppp_fsm *fsm,
+					struct net_pkt *ret_pkt,
+					void *user_data)
+{
+	struct ppp_context *ctx =
+		CONTAINER_OF(fsm, struct ppp_context, ipcp.fsm);
+
+	(void)net_pkt_write_u8(ret_pkt, IPCP_OPTION_DNS2);
+	ipcp_add_dns2(ctx, ret_pkt);
+
+	return 0;
+}
+#endif
+
 static const struct ppp_peer_option_info ipcp_peer_options[] = {
+#if defined(CONFIG_NET_L2_PPP_OPTION_SERVE_IP)
+	PPP_PEER_OPTION(IPCP_OPTION_IP_ADDRESS, ipcp_ip_address_parse,
+			ipcp_server_nak_ip_address),
+#else
 	PPP_PEER_OPTION(IPCP_OPTION_IP_ADDRESS, ipcp_ip_address_parse, NULL),
+#endif
+#if defined(CONFIG_NET_L2_PPP_OPTION_SERVE_DNS)
+	PPP_PEER_OPTION(IPCP_OPTION_DNS1, ipcp_dns_address_parse,
+			ipcp_server_nak_dns1_address),
+	PPP_PEER_OPTION(IPCP_OPTION_DNS2, ipcp_dns_address_parse,
+			ipcp_server_nak_dns2_address),
+#endif
 };
 
 static int ipcp_config_info_req(struct ppp_fsm *fsm,
@@ -240,7 +327,7 @@ static void ipcp_set_dns_servers(struct ppp_fsm *fsm)
 		(struct sockaddr *) &dns2,
 		NULL
 	};
-	int i, ret;
+	int ret;
 
 	if (!dns1.sin_addr.s_addr) {
 		return;
@@ -251,16 +338,7 @@ static void ipcp_set_dns_servers(struct ppp_fsm *fsm)
 	}
 
 	dnsctx = dns_resolve_get_default();
-	for (i = 0; i < CONFIG_DNS_NUM_CONCUR_QUERIES; i++) {
-		if (!dnsctx->queries[i].cb) {
-			continue;
-		}
-
-		dns_resolve_cancel(dnsctx, dnsctx->queries[i].id);
-	}
-	dns_resolve_close(dnsctx);
-
-	ret = dns_resolve_init(dnsctx, NULL, dns_servers);
+	ret = dns_resolve_reconfigure(dnsctx, NULL, dns_servers);
 	if (ret < 0) {
 		NET_ERR("Could not set DNS servers");
 		return;
@@ -331,11 +409,11 @@ static void ipcp_up(struct ppp_fsm *fsm)
 				    NET_ADDR_MANUAL,
 				    0);
 	if (addr == NULL) {
-		NET_ERR("Could not set IP address %s", log_strdup(addr_str));
+		NET_ERR("Could not set IP address %s", addr_str);
 		return;
 	}
 
-	NET_DBG("PPP up with address %s", log_strdup(addr_str));
+	NET_DBG("PPP up with address %s", addr_str);
 	ppp_network_up(ctx, PPP_IP);
 
 	ctx->is_ipcp_up = true;
@@ -349,10 +427,11 @@ static void ipcp_down(struct ppp_fsm *fsm)
 	struct ppp_context *ctx = CONTAINER_OF(fsm, struct ppp_context,
 					       ipcp.fsm);
 
-	if (ctx->is_ipcp_up) {
-		net_if_ipv4_addr_rm(ctx->iface, &ctx->ipcp.my_options.address);
+	/* Ensure address is always removed if it exists */
+	if (ctx->ipcp.my_options.address.s_addr) {
+		(void)net_if_ipv4_addr_rm(
+			ctx->iface, &ctx->ipcp.my_options.address);
 	}
-
 	memset(&ctx->ipcp.my_options.address, 0,
 	       sizeof(ctx->ipcp.my_options.address));
 	memset(&ctx->ipcp.my_options.dns1_address, 0,
@@ -365,10 +444,6 @@ static void ipcp_down(struct ppp_fsm *fsm)
 	}
 
 	ctx->is_ipcp_up = false;
-
-	if (!net_if_ipv4_addr_rm(ctx->iface, &ctx->ipcp.my_options.address)) {
-		NET_ERR("Failed removing address");
-	}
 
 	ppp_network_down(ctx, PPP_IP);
 }

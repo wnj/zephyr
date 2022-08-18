@@ -5,7 +5,8 @@
  */
 
 #include "mem_protect.h"
-#include <syscall_handler.h>
+#include <zephyr/syscall_handler.h>
+#include <zephyr/sys/libc-hooks.h> /* for z_libc_partition */
 
 /* function prototypes */
 static inline void dummy_start(struct k_timer *timer)
@@ -21,7 +22,7 @@ static inline void dummy_end(struct k_timer *timer)
 K_THREAD_STACK_DEFINE(test_1_stack, INHERIT_STACK_SIZE);
 K_THREAD_STACK_DEFINE(parent_thr_stack, STACK_SIZE);
 K_THREAD_STACK_DEFINE(child_thr_stack, STACK_SIZE);
-K_MEM_POOL_DEFINE(res_pool, BLK_SIZE_MIN, BLK_SIZE_MAX, BLK_NUM_MAX, BLK_ALIGN);
+K_HEAP_DEFINE(heap_mem, BLK_SIZE_MAX * BLK_NUM_MAX);
 K_SEM_DEFINE(inherit_sem, SEMAPHORE_INIT_COUNT, SEMAPHORE_MAX_COUNT);
 K_SEM_DEFINE(sync_sem, SEM_INIT_VAL, SEM_MAX_VAL);
 K_MUTEX_DEFINE(inherit_mutex);
@@ -38,6 +39,9 @@ K_MEM_PARTITION_DEFINE(inherit_memory_partition,
 		       K_MEM_PARTITION_P_RW_U_RW);
 
 struct k_mem_partition *inherit_memory_partition_array[] = {
+#if Z_LIBC_PARTITION_EXISTS
+	&z_libc_partition,
+#endif
 	&inherit_memory_partition,
 	&ztest_mem_partition
 };
@@ -55,7 +59,7 @@ static void access_test(void)
 	(void) k_timer_status_get(&inherit_timer);
 	k_msgq_put(&inherit_msgq, (void *)&msg_q_data, K_NO_WAIT);
 	k_mutex_unlock(&inherit_mutex);
-	inherit_buf[10] = 0xA5;
+	inherit_buf[MEM_REGION_ALLOC-1] = 0xA5;
 }
 
 static void test_thread_1_for_user(void *p1, void *p2, void *p3)
@@ -90,7 +94,7 @@ static void test_thread_1_for_SU(void *p1, void *p2, void *p3)
  * - Then check child thread can't access to the parent thread object using API
  *   command k_thread_priority_get()
  * - At the same moment that test verifies that child thread was granted
- *   permission on a kernel objects. That meanis child user thread caller
+ *   permission on a kernel objects. That means child user thread caller
  *   already has permission on the thread objects being granted.
 
  * @ingroup kernel_memprotect_tests
@@ -100,9 +104,14 @@ static void test_thread_1_for_SU(void *p1, void *p2, void *p3)
  */
 void test_permission_inheritance(void)
 {
-	k_mem_domain_init(&inherit_mem_domain,
-			  ARRAY_SIZE(inherit_memory_partition_array),
-			  inherit_memory_partition_array);
+	int ret;
+
+	ret = k_mem_domain_init(&inherit_mem_domain,
+				ARRAY_SIZE(inherit_memory_partition_array),
+				inherit_memory_partition_array);
+	if (ret != 0) {
+		ztest_test_fail();
+	}
 
 	parent_tid = k_current_get();
 	k_mem_domain_add_thread(&inherit_mem_domain, parent_tid);
@@ -123,28 +132,28 @@ void test_permission_inheritance(void)
 	k_thread_join(&test_1_tid, K_FOREVER);
 }
 
-struct k_mem_pool *z_impl_ret_resource_pool_ptr(void)
+struct k_heap *z_impl_ret_resource_pool_ptr(void)
 {
 	return _current->resource_pool;
 }
 
-static inline struct k_mem_pool *z_vrfy_ret_resource_pool_ptr(void)
+static inline struct k_heap *z_vrfy_ret_resource_pool_ptr(void)
 {
 	return z_impl_ret_resource_pool_ptr();
 }
 #include <syscalls/ret_resource_pool_ptr_mrsh.c>
-struct k_mem_pool *child_res_pool_ptr;
-struct k_mem_pool *parent_res_pool_ptr;
+struct k_heap *child_heap_mem_ptr;
+struct k_heap *parent_heap_mem_ptr;
 
 void child_handler(void *p1, void *p2, void *p3)
 {
-	child_res_pool_ptr = ret_resource_pool_ptr();
+	child_heap_mem_ptr = ret_resource_pool_ptr();
 	k_sem_give(&sync_sem);
 }
 
 void parent_handler(void *p1, void *p2, void *p3)
 {
-	parent_res_pool_ptr = ret_resource_pool_ptr();
+	parent_heap_mem_ptr = ret_resource_pool_ptr();
 	k_thread_create(&child_thr, child_thr_stack,
 			K_THREAD_STACK_SIZEOF(child_thr_stack),
 			child_handler,
@@ -156,7 +165,7 @@ void parent_handler(void *p1, void *p2, void *p3)
  * @brief Test child thread inherits parent's thread resource pool
  *
  * @details
- * - Create a resource pool res_pool for the parent thread.
+ * - Create a memory heap heap_mem for the parent thread.
  * - Then special system call ret_resource_pool_ptr() returns pointer
  *   to the resource pool of the current thread.
  * - Call it in the parent_handler() and in the child_handler()
@@ -167,7 +176,7 @@ void parent_handler(void *p1, void *p2, void *p3)
  *
  * @ingroup kernel_memprotect_tests
  *
- * @see k_thread_resource_pool_assign()
+ * @see z_thread_heap_assign()
  */
 void test_inherit_resource_pool(void)
 {
@@ -176,10 +185,11 @@ void test_inherit_resource_pool(void)
 			K_THREAD_STACK_SIZEOF(parent_thr_stack),
 			parent_handler,
 			NULL, NULL, NULL,
-			PRIORITY, 0, K_NO_WAIT);
-	k_thread_resource_pool_assign(&parent_thr, &res_pool);
+			PRIORITY, 0, K_FOREVER);
+	k_thread_heap_assign(&parent_thr, &heap_mem);
+	k_thread_start(&parent_thr);
 	k_sem_take(&sync_sem, K_FOREVER);
-	zassert_true(parent_res_pool_ptr == child_res_pool_ptr,
+	zassert_true(parent_heap_mem_ptr == child_heap_mem_ptr,
 		     "Resource pool of the parent thread not inherited,"
 		     " by child thread");
 }

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <drivers/sensor.h>
-#include <drivers/i2c.h>
-#include <drivers/gpio.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/gpio.h>
 
 #define FXOS8700_REG_STATUS			0x00
 #define FXOS8700_REG_OUTXMSB			0x01
@@ -103,12 +103,6 @@ enum fxos8700_mode {
 	FXOS8700_MODE_HYBRID		= 3,
 };
 
-enum fxos8700_range {
-	FXOS8700_RANGE_2G		= 0,
-	FXOS8700_RANGE_4G,
-	FXOS8700_RANGE_8G,
-};
-
 enum fxos8700_power_mode {
 	FXOS8700_PM_NORMAL		= 0,
 	FXOS8700_PM_LOW_NOISE_LOW_POWER,
@@ -131,19 +125,14 @@ enum fxos_trigger_type {
 };
 
 struct fxos8700_config {
-	char *i2c_name;
+	struct i2c_dt_spec i2c;
 #ifdef CONFIG_FXOS8700_TRIGGER
-	char *gpio_name;
-	uint8_t gpio_pin;
-	gpio_dt_flags_t gpio_flags;
+	struct gpio_dt_spec int_gpio;
 #endif
-	uint8_t i2c_address;
-	char *reset_name;
-	uint8_t reset_pin;
-	gpio_dt_flags_t reset_flags;
+	struct gpio_dt_spec reset_gpio;
 	enum fxos8700_mode mode;
 	enum fxos8700_power_mode power_mode;
-	enum fxos8700_range range;
+	uint8_t range;
 	uint8_t start_addr;
 	uint8_t start_channel;
 	uint8_t num_channels;
@@ -161,12 +150,9 @@ struct fxos8700_config {
 };
 
 struct fxos8700_data {
-	const struct device *i2c;
 	struct k_sem sem;
 #ifdef CONFIG_FXOS8700_TRIGGER
 	const struct device *dev;
-	const struct device *gpio;
-	uint8_t gpio_pin;
 	struct gpio_callback gpio_cb;
 	sensor_trigger_handler_t drdy_handler;
 #endif

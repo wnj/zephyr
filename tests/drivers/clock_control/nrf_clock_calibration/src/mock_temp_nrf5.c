@@ -3,10 +3,10 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include <device.h>
-#include <drivers/sensor.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/sensor.h>
 
-/* Mock of internal temperature sensore. */
+/* Mock of internal temperature sensor. */
 #ifdef CONFIG_TEMP_NRF5
 #error "Cannot be enabled because it is being mocked"
 #endif
@@ -43,9 +43,9 @@ static const struct sensor_driver_api mock_temp_nrf5_driver_api = {
 	.channel_get = mock_temp_nrf5_channel_get,
 };
 
-DEVICE_AND_API_INIT(mock_temp_nrf5,
-		    DT_LABEL(DT_INST(0, nordic_nrf_temp)),
+DEVICE_DT_DEFINE(DT_INST(0, nordic_nrf_temp),
 		    mock_temp_nrf5_init,
+		    NULL,
 		    NULL,
 		    NULL,
 		    POST_KERNEL,

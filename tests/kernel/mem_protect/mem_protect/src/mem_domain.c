@@ -5,779 +5,612 @@
  */
 
 #include "mem_protect.h"
-#include <sys/mempool.h>
+#include <kernel_internal.h> /* For z_main_thread */
+#include <zephyr/sys/libc-hooks.h> /* for z_libc_partition */
 
-#define ERROR_STR \
-	("Fault didn't occur when we accessed a unassigned memory domain.")
+static struct k_thread child_thread;
+static K_THREAD_STACK_DEFINE(child_stack, 512 + CONFIG_TEST_EXTRA_STACK_SIZE);
 
-/****************************************************************************/
-K_THREAD_STACK_DEFINE(mem_domain_1_stack, MEM_DOMAIN_STACK_SIZE);
-K_THREAD_STACK_DEFINE(mem_domain_2_stack, MEM_DOMAIN_STACK_SIZE);
-K_THREAD_STACK_DEFINE(mem_domain_6_stack, MEM_DOMAIN_STACK_SIZE);
-struct k_thread mem_domain_1_tid, mem_domain_2_tid, mem_domain_6_tid;
-struct k_mem_domain domain0, domain1, domain4, name_domain, overlap_domain;
+/* Special memory domain for test case purposes */
+static struct k_mem_domain test_domain;
 
-struct k_thread user_thread0, parent_thr_md, child_thr_md;
-k_tid_t usr_tid0, usr_tid1, child_tid;
-K_THREAD_STACK_DEFINE(user_thread0_stack, STACK_SIZE_MD);
-K_THREAD_STACK_DEFINE(child_thr_stack_md, STACK_SIZE_MD);
-K_THREAD_STACK_DEFINE(parent_thr_stack_md, STACK_SIZE_MD);
+#if Z_LIBC_PARTITION_EXISTS
+#define PARTS_USED	3
+#else
+#define PARTS_USED	2
+#endif
+/* Maximum number of allowable memory partitions defined by the build */
+#define NUM_RW_PARTS	(CONFIG_MAX_DOMAIN_PARTITIONS - PARTS_USED)
 
-struct k_sem sync_sem_md;
+/* Max number of allowable partitions, derived at runtime. Might be less. */
+ZTEST_BMEM int num_rw_parts;
 
-uint8_t __aligned(MEM_REGION_ALLOC) buf0[MEM_REGION_ALLOC];
-K_MEM_PARTITION_DEFINE(part0, buf0, sizeof(buf0),
-		K_MEM_PARTITION_P_RW_U_RW);
+/* Set of read-write buffers each in their own partition */
+static volatile uint8_t __aligned(MEM_REGION_ALLOC)
+	rw_bufs[NUM_RW_PARTS][MEM_REGION_ALLOC];
+static struct k_mem_partition rw_parts[NUM_RW_PARTS];
 
-K_APPMEM_PARTITION_DEFINE(part1);
-K_APP_BMEM(part1) uint8_t __aligned(MEM_REGION_ALLOC) buf1[MEM_REGION_ALLOC];
-struct k_mem_partition *app1_parts[] = {
-	&part1
-};
-K_APPMEM_PARTITION_DEFINE(part_arch);
-K_APP_BMEM(part_arch) uint8_t __aligned(MEM_REGION_ALLOC) \
-buf_arc[MEM_REGION_ALLOC];
-
-K_APPMEM_PARTITION_DEFINE(part2);
-K_APP_DMEM(part2) int part2_var = 1356;
-K_APP_BMEM(part2) int part2_zeroed_var = 20420;
-K_APP_BMEM(part2) int part2_bss_var;
-
-SYS_MEM_POOL_DEFINE(data_pool, NULL, BLK_SIZE_MIN_MD, BLK_SIZE_MAX_MD,
-		BLK_NUM_MAX_MD, BLK_ALIGN_MD, K_APP_DMEM_SECTION(part2));
-
-/****************************************************************************/
-/* The mem domains needed.*/
-uint8_t MEM_DOMAIN_ALIGNMENT mem_domain_buf[MEM_REGION_ALLOC];
-uint8_t MEM_DOMAIN_ALIGNMENT mem_domain_buf1[MEM_REGION_ALLOC];
-
-/* partitions added later in the test cases.*/
-uint8_t MEM_DOMAIN_ALIGNMENT mem_domain_tc3_part1[MEM_REGION_ALLOC];
-uint8_t MEM_DOMAIN_ALIGNMENT mem_domain_tc3_part2[MEM_REGION_ALLOC];
-uint8_t MEM_DOMAIN_ALIGNMENT mem_domain_tc3_part3[MEM_REGION_ALLOC];
-uint8_t MEM_DOMAIN_ALIGNMENT mem_domain_tc3_part4[MEM_REGION_ALLOC];
-uint8_t MEM_DOMAIN_ALIGNMENT mem_domain_tc3_part5[MEM_REGION_ALLOC];
-uint8_t MEM_DOMAIN_ALIGNMENT mem_domain_tc3_part6[MEM_REGION_ALLOC];
-uint8_t MEM_DOMAIN_ALIGNMENT mem_domain_tc3_part7[MEM_REGION_ALLOC];
-uint8_t MEM_DOMAIN_ALIGNMENT mem_domain_tc3_part8[MEM_REGION_ALLOC];
-
-K_MEM_PARTITION_DEFINE(mem_domain_memory_partition,
-		       mem_domain_buf,
-		       sizeof(mem_domain_buf),
+/* A single read-only partition */
+static volatile uint8_t __aligned(MEM_REGION_ALLOC) ro_buf[MEM_REGION_ALLOC];
+K_MEM_PARTITION_DEFINE(ro_part, ro_buf, sizeof(ro_buf),
+		       K_MEM_PARTITION_P_RO_U_RO);
+/* A partition to test overlap that has same ro_buf as a partition ro_part */
+K_MEM_PARTITION_DEFINE(overlap_part, ro_buf, sizeof(ro_buf),
 		       K_MEM_PARTITION_P_RW_U_RW);
 
-#if defined(CONFIG_X86) || \
-	((defined(CONFIG_ARMV8_M_BASELINE) || \
-		defined(CONFIG_ARMV8_M_MAINLINE)) \
-		&& defined(CONFIG_CPU_HAS_ARM_MPU))
-K_MEM_PARTITION_DEFINE(mem_domain_memory_partition1,
-		       mem_domain_buf1,
-		       sizeof(mem_domain_buf1),
-		       K_MEM_PARTITION_P_RO_U_RO);
-#else
-K_MEM_PARTITION_DEFINE(mem_domain_memory_partition1,
-		       mem_domain_buf1,
-		       sizeof(mem_domain_buf1),
-		       K_MEM_PARTITION_P_RW_U_RO);
-#endif
-
-struct k_mem_partition *mem_domain_memory_partition_array[] = {
-	&mem_domain_memory_partition,
-	&ztest_mem_partition
-};
-
-struct k_mem_partition *mem_domain_memory_partition_array1[] = {
-	&mem_domain_memory_partition1,
-	&ztest_mem_partition
-};
-struct k_mem_domain mem_domain_mem_domain;
-struct k_mem_domain mem_domain1;
-
-/****************************************************************************/
-/* Common init functions */
-static inline void mem_domain_init(void)
+/* Static thread, used by a couple tests */
+static void zzz_entry(void *p1, void *p2, void *p3)
 {
-	k_mem_domain_init(&mem_domain_mem_domain,
-			  ARRAY_SIZE(mem_domain_memory_partition_array),
-			  mem_domain_memory_partition_array);
+	k_sleep(K_FOREVER);
 }
 
-static inline void set_valid_fault_value(int test_case_number)
+static K_THREAD_DEFINE(zzz_thread, 256 + CONFIG_TEST_EXTRA_STACK_SIZE,
+		       zzz_entry, NULL, NULL, NULL, 0, 0, 0);
+
+void test_mem_domain_setup(void)
 {
-	switch (test_case_number) {
-	case 1:
-		set_fault_valid(false);
-		break;
-	case 2:
-		set_fault_valid(true);
-		break;
-	default:
-		set_fault_valid(false);
-		break;
+	int max_parts = arch_mem_domain_max_partitions_get();
+	struct k_mem_partition *parts[] = {
+#if Z_LIBC_PARTITION_EXISTS
+		&z_libc_partition,
+#endif
+		&ro_part, &ztest_mem_partition
+	};
+
+	num_rw_parts = max_parts - PARTS_USED;
+	zassert_true(num_rw_parts <= NUM_RW_PARTS,
+			"CONFIG_MAX_DOMAIN_PARTITIONS incorrectly tuned, %d should be at least %d",
+			CONFIG_MAX_DOMAIN_PARTITIONS, max_parts);
+	zassert_true(num_rw_parts > 0, "no free memory partitions");
+
+	zassert_equal(
+		k_mem_domain_init(&test_domain, ARRAY_SIZE(parts), parts),
+		0, "failed to initialize memory domain");
+
+	for (unsigned int i = 0; i < num_rw_parts; i++) {
+		rw_parts[i].start = (uintptr_t)&rw_bufs[i];
+		rw_parts[i].size = MEM_REGION_ALLOC;
+		rw_parts[i].attr = K_MEM_PARTITION_P_RW_U_RW;
+
+		for (unsigned int j = 0; j < MEM_REGION_ALLOC; j++) {
+			rw_bufs[i][j] = (j % 256U);
+		}
+
+		zassert_equal(
+			k_mem_domain_add_partition(&test_domain, &rw_parts[i]),
+			0, "cannot add memory partition");
+	}
+
+	for (unsigned int j = 0; j < MEM_REGION_ALLOC; j++) {
+		ro_buf[j] = (j % 256U);
 	}
 }
 
-/****************************************************************************/
-/* Userspace function */
-static void mem_domain_for_user(void *tc_number, void *p2, void *p3)
+/* Helper function; run a function under a child user thread.
+ * If domain is not NULL, add the child thread to that domain, instead of
+ * whatever it would inherit.
+ */
+static void spawn_child_thread(k_thread_entry_t entry,
+			       struct k_mem_domain *domain, bool should_fault)
 {
-	set_valid_fault_value((int)(uintptr_t)tc_number);
+	set_fault_valid(should_fault);
 
-	mem_domain_buf[0] = 10U;
-	if (valid_fault == false) {
-		ztest_test_pass();
-	} else {
+	k_thread_create(&child_thread, child_stack,
+			K_THREAD_STACK_SIZEOF(child_stack), entry,
+			NULL, NULL, NULL, 0, K_USER, K_FOREVER);
+	k_thread_name_set(&child_thread, "child_thread");
+	if (domain != NULL) {
+		k_mem_domain_add_thread(domain, &child_thread);
+	}
+	k_thread_start(&child_thread);
+	k_thread_join(&child_thread, K_FOREVER);
+
+	if (should_fault && valid_fault) {
+		/* valid_fault gets cleared if an expected exception
+		 * took place
+		 */
+		printk("test function %p was supposed to fault but didn't\n",
+		       entry);
 		ztest_test_fail();
 	}
 }
 
-static void mem_domain_test_1(void *tc_number, void *p2, void *p3)
+/* read and write to all the rw_parts */
+static void rw_part_access(void *p1, void *p2, void *p3)
 {
-	if ((uintptr_t)tc_number == 1U) {
-		mem_domain_buf[0] = 10U;
-		k_mem_domain_add_thread(&mem_domain_mem_domain,
-					k_current_get());
+	for (unsigned int i = 0; i < num_rw_parts; i++) {
+		for (unsigned int j = 0; j < MEM_REGION_ALLOC; j++) {
+			/* Test read */
+			zassert_equal(rw_bufs[i][j], j % 256U,
+				      "bad data in rw_buf[%d][%d]", i, j);
+			/* Test writes */
+			rw_bufs[i][j]++;
+			rw_bufs[i][j]--;
+		}
 	}
-
-	k_thread_user_mode_enter(mem_domain_for_user, tc_number, NULL, NULL);
-
 }
 
-/****************************************************************************/
+/* read the ro_part */
+static void ro_part_access(void *p1, void *p2, void *p3)
+{
+	for (unsigned int i = 0; i < MEM_REGION_ALLOC; i++) {
+		zassert_equal(ro_buf[i], i % 256U,
+			      "bad data in ro_buf[%d]", i);
+	}
+}
+
+/* attempt to write to ro_part */
+static void ro_write_entry(void *p1, void *p2, void *p3)
+{
+	/* Should fault here */
+	ro_buf[0] = 200;
+}
+
 /**
  * @brief Check if the mem_domain is configured and accessible for userspace
  *
- * @ingroup kernel_memgroup_tests
+ * Join a memory domain with a read-write memory partition and a read-only
+ * partition within it, and show that the data in the partition is accessible
+ * as expected by the permissions provided.
  *
- * @see k_mem_domain_init()
+ * @ingroup kernel_memprotect_tests
  */
 void test_mem_domain_valid_access(void)
 {
-	uintptr_t tc_number = 1U;
-
-	mem_domain_init();
-
-	k_thread_create(&mem_domain_1_tid,
-			mem_domain_1_stack,
-			MEM_DOMAIN_STACK_SIZE,
-			mem_domain_test_1,
-			(void *)tc_number, NULL, NULL,
-			10, 0, K_NO_WAIT);
-
-	k_thread_join(&mem_domain_1_tid, K_FOREVER);
+	spawn_child_thread(rw_part_access, &test_domain, false);
+	spawn_child_thread(ro_part_access, &test_domain, false);
 }
 
-/****************************************************************************/
 /**
- * @brief Test to check memory domain invalid access
- *
- * @details If mem domain was not added to the thread and a access to it should
- * cause a fault.
+ * @brief Show that a user thread can't touch partitions not in its domain
  *
  * @ingroup kernel_memprotect_tests
  */
 void test_mem_domain_invalid_access(void)
 {
-	uintptr_t tc_number = 2U;
-
-	k_thread_create(&mem_domain_2_tid,
-			mem_domain_2_stack,
-			MEM_DOMAIN_STACK_SIZE,
-			mem_domain_test_1,
-			(void *)tc_number, NULL, NULL,
-			10, 0, K_NO_WAIT);
-
-	k_thread_join(&mem_domain_2_tid, K_FOREVER);
+	/* child not added to test_domain, will fault for both */
+	spawn_child_thread(rw_part_access, NULL, true);
+	spawn_child_thread(ro_part_access, NULL, true);
 }
-/***************************************************************************/
-static void thread_entry_rw(void *p1, void *p2, void *p3)
-{
-	set_fault_valid(false);
 
-	uint8_t read_data = mem_domain_buf[0];
-
-	/* Just to avoid compiler warnings */
-	(void) read_data;
-
-	/* Write to the partition */
-	mem_domain_buf[0] = 99U;
-
-	ztest_test_pass();
-}
 /**
- * @brief Test memory domain read/write access
+ * @brief Show that a read-only partition can't be written to
  *
- * @details Provide read/write access to a partition
- * and verify access from a user thread added to it
+ * @ingroup kernel_memgroup_tests
+ */
+void test_mem_domain_no_writes_to_ro(void)
+{
+	/* Show that trying to write to a read-only partition causes a fault */
+	spawn_child_thread(ro_write_entry, &test_domain, true);
+}
+
+/**
+ * @brief Show that adding/removing partitions works
+ *
+ * Show that removing a partition doesn't affect access to other partitions.
+ * Show that removing a partition generates a fault if its data is accessed.
+ * Show that adding a partition back restores access from a user thread.
  *
  * @ingroup kernel_memprotect_tests
  */
-void test_mem_domain_partitions_user_rw(void)
+void test_mem_domain_remove_add_partition(void)
 {
-	/* Initialize the memory domain */
-	k_mem_domain_init(&mem_domain_mem_domain,
-			  ARRAY_SIZE(mem_domain_memory_partition_array),
-			  mem_domain_memory_partition_array);
+	zassert_equal(
+		k_mem_domain_remove_partition(&test_domain, &rw_parts[0]),
+		0, "failed to remove memory partition");
 
-	k_mem_domain_add_thread(&mem_domain_mem_domain,
-				k_current_get());
+	/* Should still work, we didn't remove ro_part */
+	spawn_child_thread(ro_part_access, &test_domain, false);
 
-	k_thread_user_mode_enter(thread_entry_rw, NULL, NULL, NULL);
-}
-/****************************************************************************/
-static void user_thread_entry_ro(void *p1, void *p2, void *p3)
-{
-	set_fault_valid(true);
+	/* This will fault, we removed one of the rw_part from the domain */
+	spawn_child_thread(rw_part_access, &test_domain, true);
 
-	/* Read the partition */
-	uint8_t read_data = mem_domain_buf1[0];
+	/* Restore test_domain contents so we don't mess up other tests */
+	zassert_equal(
+		k_mem_domain_add_partition(&test_domain, &rw_parts[0]),
+		0, "failed to add memory partition");
 
-	/* Just to avoid compiler warning */
-	(void) read_data;
-
-	/* Writing to the partition, this should generate fault
-	 * as the partition has read only permission for
-	 * user threads
-	 */
-	mem_domain_buf1[0] = 10U;
-
-	zassert_unreachable("The user thread is allowed to access a read only"
-			    " partition of a memory domain");
-}
-/**
- * @brief Test memory domain read/write access for user thread
- *
- * @ingroup kernel_memprotect_tests
- *
- * @see k_mem_domain_add_thread()
- */
-void test_mem_domain_partitions_user_ro(void)
-{
-	/* Initialize the memory domain containing the partition
-	 * with read only access privilege
-	 */
-	k_mem_domain_init(&mem_domain1,
-			  ARRAY_SIZE(mem_domain_memory_partition_array1),
-			  mem_domain_memory_partition_array1);
-
-	k_mem_domain_add_thread(&mem_domain1, k_current_get());
-
-	k_thread_user_mode_enter(user_thread_entry_ro, NULL, NULL, NULL);
+	/* Should work again */
+	spawn_child_thread(rw_part_access, &test_domain, false);
 }
 
-/****************************************************************************/
-/**
- * @brief Test memory domain read/write access for kernel thread
- *
- * @ingroup kernel_memprotect_tests
- */
-void test_mem_domain_partitions_supervisor_rw(void)
-{
-	k_mem_domain_init(&mem_domain_mem_domain,
-			  ARRAY_SIZE(mem_domain_memory_partition_array1),
-			  mem_domain_memory_partition_array1);
+/* user mode will attempt to initialize this and fail */
+static struct k_mem_domain no_access_domain;
 
-	k_mem_domain_add_thread(&mem_domain_mem_domain, k_current_get());
-
-	/* Create a supervisor thread */
-	k_thread_create(&mem_domain_1_tid, mem_domain_1_stack,
-			MEM_DOMAIN_STACK_SIZE, (k_thread_entry_t)thread_entry_rw,
-			NULL, NULL, NULL, 10, K_INHERIT_PERMS, K_NO_WAIT);
-
-	k_thread_join(&mem_domain_1_tid, K_FOREVER);
-}
-
-/****************************************************************************/
-
-/* add partitions */
-K_MEM_PARTITION_DEFINE(mem_domain_tc3_part1_struct,
-		       mem_domain_tc3_part1,
-		       sizeof(mem_domain_tc3_part1),
+/* Extra partition that a user thread can't add to a domain */
+static volatile uint8_t __aligned(MEM_REGION_ALLOC)
+	no_access_buf[MEM_REGION_ALLOC];
+K_MEM_PARTITION_DEFINE(no_access_part, no_access_buf, sizeof(no_access_buf),
 		       K_MEM_PARTITION_P_RW_U_RW);
 
-K_MEM_PARTITION_DEFINE(mem_domain_tc3_part2_struct,
-		       mem_domain_tc3_part2,
-		       sizeof(mem_domain_tc3_part2),
-		       K_MEM_PARTITION_P_RW_U_RW);
-
-K_MEM_PARTITION_DEFINE(mem_domain_tc3_part3_struct,
-		       mem_domain_tc3_part3,
-		       sizeof(mem_domain_tc3_part3),
-		       K_MEM_PARTITION_P_RW_U_RW);
-
-K_MEM_PARTITION_DEFINE(mem_domain_tc3_part4_struct,
-		       mem_domain_tc3_part4,
-		       sizeof(mem_domain_tc3_part4),
-		       K_MEM_PARTITION_P_RW_U_RW);
-
-K_MEM_PARTITION_DEFINE(mem_domain_tc3_part5_struct,
-		       mem_domain_tc3_part5,
-		       sizeof(mem_domain_tc3_part5),
-		       K_MEM_PARTITION_P_RW_U_RW);
-
-K_MEM_PARTITION_DEFINE(mem_domain_tc3_part6_struct,
-		       mem_domain_tc3_part6,
-		       sizeof(mem_domain_tc3_part6),
-		       K_MEM_PARTITION_P_RW_U_RW);
-
-K_MEM_PARTITION_DEFINE(mem_domain_tc3_part7_struct,
-		       mem_domain_tc3_part7,
-		       sizeof(mem_domain_tc3_part7),
-		       K_MEM_PARTITION_P_RW_U_RW);
-
-K_MEM_PARTITION_DEFINE(mem_domain_tc3_part8_struct,
-		       mem_domain_tc3_part8,
-		       sizeof(mem_domain_tc3_part8),
-		       K_MEM_PARTITION_P_RW_U_RW);
-
-
-static struct k_mem_partition *mem_domain_tc3_partition_array[] = {
-	&ztest_mem_partition,
-	&mem_domain_tc3_part1_struct,
-	&mem_domain_tc3_part2_struct,
-	&mem_domain_tc3_part3_struct,
-	&mem_domain_tc3_part4_struct,
-	&mem_domain_tc3_part5_struct,
-	&mem_domain_tc3_part6_struct,
-	&mem_domain_tc3_part7_struct,
-	&mem_domain_tc3_part8_struct
-};
-
-static struct k_mem_domain mem_domain_tc3_mem_domain;
-
-static void mem_domain_for_user_tc3(void *max_partitions, void *p2, void *p3)
+static void mem_domain_init_entry(void *p1, void *p2, void *p3)
 {
-	uintptr_t index;
-
-	set_fault_valid(true);
-
-	/* fault should be hit on the first index itself. */
-	for (index = 0U;
-	     (index < (uintptr_t)max_partitions) && (index < 8);
-	     index++) {
-		*(uintptr_t *)mem_domain_tc3_partition_array[index]->start =
-			10U;
-	}
-
-	zassert_unreachable(ERROR_STR);
-	ztest_test_fail();
+	zassert_equal(
+		k_mem_domain_init(&no_access_domain, 0, NULL),
+		0, "failed to initialize memory domain");
 }
 
-/**
- * @brief Test to check addition of partitions into a mem domain.
- *
- * @details If the access to any of the partitions are denied
- * it will cause failure. The memory domain is not added to
- * the thread and fault occurs when the user tries to access
- * that region.
- *
- * @ingroup kernel_memprotect_tests
- */
-void test_mem_domain_add_partitions_invalid(void)
+static void mem_domain_add_partition_entry(void *p1, void *p2, void *p3)
 {
-	/* Subtract one since the domain is initialized with one partition
-	 * already present.
-	 */
-	uint8_t max_partitions = (uint8_t)arch_mem_domain_max_partitions_get() - 1;
-	uint8_t index;
-
-	mem_domain_init();
-	k_mem_domain_init(&mem_domain_tc3_mem_domain,
-			  1,
-			  mem_domain_memory_partition_array);
-
-	for (index = 0U; (index < max_partitions) && (index < 8); index++) {
-		k_mem_domain_add_partition(&mem_domain_tc3_mem_domain,
-					   mem_domain_tc3_partition_array \
-					   [index]);
-
-	}
-	/* The next add_thread is done so that the
-	 * memory domain for mem_domain_tc3_mem_domain partitions are
-	 * initialized. Because the pages/regions will not be configuired for
-	 * the partitions in mem_domain_tc3_mem_domain when do a add_partition.
-	 */
-	k_mem_domain_add_thread(&mem_domain_tc3_mem_domain,
-				k_current_get());
-
-	/* configure a different memory domain for the current thread. */
-	k_mem_domain_add_thread(&mem_domain_mem_domain,
-				k_current_get());
-
-	k_thread_user_mode_enter(mem_domain_for_user_tc3,
-				 (void *)(uintptr_t)max_partitions,
-				 NULL,
-				 NULL);
-
+	zassert_equal(
+		k_mem_domain_add_partition(&test_domain, &no_access_part),
+		0, "failed to add memory partition");
 }
 
-/****************************************************************************/
-static void mem_domain_for_user_tc4(void *max_partitions, void *p2, void *p3)
+static void mem_domain_remove_partition_entry(void *p1, void *p2, void *p3)
 {
-	uintptr_t index;
-
-	set_fault_valid(false);
-
-	for (index = 0U; (index < (uintptr_t)p2) && (index < 8); index++) {
-		*(uintptr_t *)mem_domain_tc3_partition_array[index]->start =
-			10U;
-	}
-
-	ztest_test_pass();
+	zassert_equal(
+		k_mem_domain_remove_partition(&test_domain, &ro_part),
+		0, "failed to remove memory partition");
 }
 
-/**
- * @brief Test case to check addition of parititions into a mem domain.
- *
- * @details If the access to any of the partitions are denied
- * it will cause failure.
- *
- * @see k_mem_domain_init(), k_mem_domain_add_partition(),
- * k_mem_domain_add_thread(), k_thread_user_mode_enter()
- */
-void test_mem_domain_add_partitions_simple(void)
+static void mem_domain_add_thread_entry(void *p1, void *p2, void *p3)
 {
-
-	uint8_t max_partitions = (uint8_t)arch_mem_domain_max_partitions_get();
-	uint8_t index;
-
-	k_mem_domain_init(&mem_domain_tc3_mem_domain,
-			  1,
-			  mem_domain_tc3_partition_array);
-
-	/* Add additional partitions up to the max permitted number. */
-	for (index = 1U; (index < max_partitions) && (index < 8); index++) {
-		k_mem_domain_add_partition(&mem_domain_tc3_mem_domain,
-					   mem_domain_tc3_partition_array \
-					   [index]);
-
-	}
-
-	k_mem_domain_add_thread(&mem_domain_tc3_mem_domain,
-				k_current_get());
-
-	k_thread_user_mode_enter(mem_domain_for_user_tc4,
-				 (void *)(uintptr_t)max_partitions,
-				 NULL,
-				 NULL);
-
-}
-
-/****************************************************************************/
-/* Test removal of a partition. */
-static void mem_domain_for_user_tc5(void *p1, void *p2, void *p3)
-{
-	set_fault_valid(true);
-
-	/* will generate a fault */
-	mem_domain_tc3_part1[0] = 10U;
-	zassert_unreachable(ERROR_STR);
-}
-/**
- * @brief Test the removal of the partition
- *
- * @ingroup kernel_memprotect_tests
- *
- * @see k_mem_domain_remove_partition(),
- * k_mem_domain_add_thread(), k_thread_user_mode_enter()
- */
-void test_mem_domain_remove_partitions_simple(void)
-{
-	k_mem_domain_add_thread(&mem_domain_tc3_mem_domain,
-				k_current_get());
-
-	k_mem_domain_remove_partition(&mem_domain_tc3_mem_domain,
-				      &mem_domain_tc3_part1_struct);
-
-
-	k_thread_user_mode_enter(mem_domain_for_user_tc5,
-				 NULL, NULL, NULL);
-
-}
-
-/****************************************************************************/
-static void mem_domain_test_6_1(void *p1, void *p2, void *p3)
-{
-	set_fault_valid(false);
-
-	mem_domain_tc3_part1[0] = 10U;
-	k_thread_abort(k_current_get());
-}
-
-static void mem_domain_test_6_2(void *p1, void *p2, void *p3)
-{
-	set_fault_valid(true);
-
-	mem_domain_tc3_part1[0] = 10U;
-	zassert_unreachable(ERROR_STR);
-}
-
-/**
- * @brief Test the removal of partitions with inheritance check
- *
- * @details First check if the memory domain is inherited.
- * After that remove a partition then again check access to it.
- *
- * @ingroup kernel_memprotect_tests
- *
- * @see k_mem_domain_remove_partition()
- */
-void test_mem_domain_remove_partitions(void)
-{
-	uint8_t max_partitions = (uint8_t)arch_mem_domain_max_partitions_get();
-
-	/* Re-initialize domain with the max permitted number of partitions */
-	k_mem_domain_init(&mem_domain_tc3_mem_domain,
-			  MIN(max_partitions,
-			    ARRAY_SIZE(mem_domain_tc3_partition_array)),
-			  mem_domain_tc3_partition_array);
-
-	k_mem_domain_add_thread(&mem_domain_tc3_mem_domain,
-				k_current_get());
-
-	mem_domain_tc3_part1[0] = 10U;
-	mem_domain_tc3_part2[0] = 10U;
-
-	k_thread_create(&mem_domain_6_tid,
-			mem_domain_6_stack,
-			MEM_DOMAIN_STACK_SIZE,
-			mem_domain_test_6_1,
-			NULL, NULL, NULL,
-			-1, K_USER | K_INHERIT_PERMS, K_NO_WAIT);
-
-	k_thread_join(&mem_domain_6_tid, K_FOREVER);
-
-	k_mem_domain_remove_partition(&mem_domain_tc3_mem_domain,
-				      &mem_domain_tc3_part1_struct);
-
-	k_thread_create(&mem_domain_6_tid,
-			mem_domain_6_stack,
-			MEM_DOMAIN_STACK_SIZE,
-			mem_domain_test_6_2,
-			NULL, NULL, NULL,
-			-1, K_USER | K_INHERIT_PERMS, K_NO_WAIT);
-
-	k_thread_join(&mem_domain_6_tid, K_FOREVER);
+	k_mem_domain_add_thread(&test_domain, zzz_thread);
 }
 
 /**
  * @brief Test access memory domain APIs allowed to supervisor threads only
  *
- * @details
- * - Create a test case to use a memory domain APIs k_mem_domain_init()
- *   and k_mem_domain_add_partition()
- * - Run that test in kernel mode -no errors should happen.
- * - Run that test in user mode -Zephyr fatal error will happen (reason 0),
- *   because user threads can't use memory domain APIs.
- * - At the same time test that system support the definition of memory domains.
+ * Show that invoking any of the memory domain APIs from user mode leads to
+ * a fault.
  *
  * @ingroup kernel_memprotect_tests
  *
- * @see k_mem_domain_init(), k_mem_domain_add_partition()
+ * @see k_mem_domain_init(), k_mem_domain_add_partition(),
+ *	k_mem_domain_remove_partition(), k_mem_domain_add_thread()
  */
-void test_mem_domain_api_kernel_thread_only(void)
+void test_mem_domain_api_supervisor_only(void)
 {
-	set_fault_valid(true);
-
-	k_mem_domain_init(&domain0, 0, NULL);
-	k_mem_domain_add_partition(&domain0, &part0);
-}
-
-void user_handler_func(void *p1, void *p2, void *p3)
-{
-	/* Read the partition */
-	uint8_t read_data = buf1[0];
-
-	/* Just to avoid compiler warning */
-	(void) read_data;
-
-	/* Writing to the partition, this should generate fault
-	 * as the partition has read only permission for
-	 * user threads
-	 */
-	buf1[0] = 10U;
+	/* All of these should fault when invoked from a user thread */
+	spawn_child_thread(mem_domain_init_entry, NULL, true);
+	spawn_child_thread(mem_domain_add_partition_entry, NULL, true);
+	spawn_child_thread(mem_domain_remove_partition_entry, NULL, true);
+	spawn_child_thread(mem_domain_add_thread_entry, NULL, true);
 }
 
 /**
- * @brief Test system auto determine memory partition base addresses and sizes
+ * @brief Show that boot threads belong to the default memory domain
  *
- * @details
- * - Ensure that system automatically determine memory partition
- *   base address and size according to its content correctly by taking
- *   memory partition's size and compare it with size of content.
- * - If size of memory partition is equal to the size of content -test passes.
- * - If possible to take base address of the memory partition -test passes.
- * - Test that system supports the definition of memory partitions and it has
- *   a starting address and a size.
- * - Test that OS supports removing thread from its memory domain assignment.
- * - Test that user thread can't write into memory partition. Try to write data,
- *   that will lead to the fatal error.
+ * Static threads and the main thread are supposed to start as members of
+ * the default memory domain. Prove this is the case by examining the
+ * memory domain membership of z_main_thread and a static thread.
  *
  * @ingroup kernel_memprotect_tests
  */
-void test_mem_part_auto_determ_size(void)
+void test_mem_domain_boot_threads(void)
 {
-	set_fault_valid(true);
+	/* Check that a static thread got put in the default memory domain */
+	zassert_true(zzz_thread->mem_domain_info.mem_domain ==
+		     &k_mem_domain_default, "unexpected mem domain %p",
+		     zzz_thread->mem_domain_info.mem_domain);
 
-	k_sem_init(&sync_sem_md, SYNC_SEM_INIT_COUNT, SYNC_SEM_MAX_COUNT);
-	k_thread_access_grant(&user_thread0, &sync_sem_md);
+	/* Check that the main thread is also a member of the default domain */
+	zassert_true(z_main_thread.mem_domain_info.mem_domain ==
+		     &k_mem_domain_default, "unexpected mem domain %p",
+		     z_main_thread.mem_domain_info.mem_domain);
 
-	/* check that size of memory partition is correct */
-	zassert_true(part1.size == MEM_REGION_ALLOC, "Size of memory partition"
-			" determined not correct according to its content");
-	/* check base address of memory partition determined at build time */
-	zassert_true(part1.start, "Base address of memory partition"
-			" not determined at build time");
+	k_thread_abort(zzz_thread);
+}
 
-	k_mem_domain_init(&domain1, ARRAY_SIZE(app1_parts), app1_parts);
+static ZTEST_BMEM volatile bool spin_done;
+static K_SEM_DEFINE(spin_sem, 0, 1);
 
-	/* That line below is a replacament for the obsolete API call
-	 * k_mem_domain_remove_thread(k_current_get())
-	 * Test possibility to remove thread from its domain memory assignment,
-	 * so the current thread assigned to the domain1 will be removed
-	 */
-	k_mem_domain_add_thread(&domain0, k_current_get());
+static void spin_entry(void *p1, void *p2, void *p3)
+{
+	printk("spin thread entry\n");
+	k_sem_give(&spin_sem);
 
-	usr_tid0 = k_thread_create(&user_thread0, user_thread0_stack,
-					K_THREAD_STACK_SIZEOF(
-						user_thread0_stack),
-					user_handler_func,
-					NULL, NULL, NULL,
-					PRIORITY_MD,
-					K_USER, K_NO_WAIT);
-
-	/* Add user thread to the memory domain, and try to write to its
-	 * partition. That will generate fatal error, because user thread not
-	 * allowed to write*/
-	k_mem_domain_add_thread(&domain1, usr_tid0);
+	while (!spin_done) {
+		k_busy_wait(1);
+	}
+	printk("spin thread completed\n");
 }
 
 /**
- * @brief Test partitions sized per the constraints of the MPU hardware
+ * @brief Show that moving a thread from one domain to another works
  *
- * @details
- * - Test that system automatically determine memory partition size according
- *   to the constraints of the platform's MPU hardware.
- * - Different platforms like x86, ARM and ARC have different MPU hardware for
- *   memory management.
- * - That test checks that MPU hardware works as expected and gives for the
- *   memory partition the most suitable and possible size.
+ * Start a thread and have it spin. Then while it is spinning, show that
+ * adding it to another memory domain doesn't cause any faults.
+ *
+ * This test is of particular importance on SMP systems where the child
+ * thread is spinning on a different CPU concurrently with the migration
+ * operation.
  *
  * @ingroup kernel_memprotect_tests
+ *
+ * @see k_mem_domain_add_thread()
  */
-void test_mem_part_auto_determ_size_per_mpu(void)
-{
-	zassert_true(part_arch.size == MEM_REGION_ALLOC, NULL);
-}
 
-void child_thr_handler(void *p1, void *p2, void *p3)
-{
-	ARG_UNUSED(p1);
-	ARG_UNUSED(p2);
-	ARG_UNUSED(p3);
-}
+#if CONFIG_MP_NUM_CPUS > 1
+#define PRIO	K_PRIO_COOP(0)
+#else
+#define PRIO	K_PRIO_PREEMPT(1)
+#endif
 
-void parent_thr_handler(void *p1, void *p2, void *p3)
+void test_mem_domain_migration(void)
 {
-	k_tid_t child_tid = k_thread_create(&child_thr_md, child_thr_stack_md,
-					K_THREAD_STACK_SIZEOF(child_thr_stack_md),
-					child_thr_handler,
-					NULL, NULL, NULL,
-					PRIORITY_MD, 0, K_NO_WAIT);
-	struct k_thread *thread = child_tid;
+	int ret;
 
-	zassert_true(thread->mem_domain_info.mem_domain == &domain4, NULL);
-	k_sem_give(&sync_sem_md);
+	set_fault_valid(false);
+
+	k_thread_create(&child_thread, child_stack,
+			K_THREAD_STACK_SIZEOF(child_stack), spin_entry,
+			NULL, NULL, NULL,
+			PRIO, K_USER | K_INHERIT_PERMS, K_FOREVER);
+	k_thread_name_set(&child_thread, "child_thread");
+	k_object_access_grant(&spin_sem, &child_thread);
+	k_thread_start(&child_thread);
+
+	/* Ensure that the child thread has started */
+	ret = k_sem_take(&spin_sem, K_FOREVER);
+	zassert_equal(ret, 0, "k_sem_take failed");
+
+	/* Now move it to test_domain. This domain also has the ztest partition,
+	 * so the child thread should keep running and not explode
+	 */
+	printk("migrate to new domain\n");
+	k_mem_domain_add_thread(&test_domain, &child_thread);
+
+	/**TESTPOINT: add to existing domain will do nothing */
+	k_mem_domain_add_thread(&test_domain, &child_thread);
+
+	/* set spin_done so the child thread completes */
+	printk("set test completion\n");
+	spin_done = true;
+
+	k_thread_join(&child_thread, K_FOREVER);
 }
 
 /**
- * @brief Test memory partition is inherited by the child thread
+ * @brief Test system assert when new partition overlaps the existing partition
  *
  * @details
- * - Define memory partition and add it to the parent thread.
- * - Parent thread creates a child thread. That child thread should be already
- *   added to the parent's memory domain too.
- * - It will be checked by using thread->mem_domain_info.mem_domain
- * - If that child thread structure is equal to the current
- *   memory domain address, then pass the test. It means child thread inherited
- *   the memory domain assignment of their parent.
+ * Test Objective:
+ * - Test assertion if the new partition overlaps existing partition in domain
+ *
+ * Testing techniques:
+ * - System testing
+ *
+ * Prerequisite Conditions:
+ * - N/A
+ *
+ * Input Specifications:
+ * - N/A
+ *
+ * Test Procedure:
+ * -# Define testing memory partition overlap_part with the same start ro_buf
+ *  as has the existing memory partition ro_part
+ * -# Try to add overlap_part to the memory domain. When adding the new
+ *  partition to the memory domain the system will assert that new partition
+ *  overlaps with the existing partition ro_part .
+ *
+ * Expected Test Result:
+ * - Must happen an assertion error indicating that the new partition overlaps
+ *   the existing one.
+ *
+ * Pass/Fail Criteria:
+ * - Success if the overlap assertion will happen.
+ * - Failure if the overlap assertion will not happen.
+ *
+ * Assumptions and Constraints:
+ * - N/A
  *
  * @ingroup kernel_memprotect_tests
  *
- * @see k_mem_add_thread(), k_mem_remove_thread()
+ * @see k_mem_domain_add_partition()
  */
-void test_mem_part_inherit_by_child_thr(void)
+void test_mem_part_overlap(void)
 {
-	k_sem_reset(&sync_sem_md);
-	k_mem_domain_init(&domain4, 0, NULL);
-	k_mem_domain_add_partition(&domain4, &part0);
-	/* that line below is a replacament for
-	 * k_mem_domain_remove_thread(k_current_get())
-	 */
-	k_mem_domain_add_thread(&domain0, k_current_get());
+	set_fault_valid(false);
 
-	k_tid_t parent_tid = k_thread_create(&parent_thr_md, parent_thr_stack_md,
-					K_THREAD_STACK_SIZEOF(parent_thr_stack_md),
-					parent_thr_handler,
-					NULL, NULL, NULL,
-					PRIORITY_MD, 0, K_NO_WAIT);
-	k_mem_domain_add_thread(&domain4, parent_tid);
-	k_sem_take(&sync_sem_md, K_FOREVER);
+	zassert_not_equal(
+		k_mem_domain_add_partition(&test_domain, &overlap_part),
+		0, "should fail to add memory partition");
+}
+
+extern struct k_spinlock z_mem_domain_lock;
+
+static ZTEST_BMEM bool need_recover_spinlock;
+
+static struct k_mem_domain test_domain_fail;
+
+void post_fatal_error_handler(unsigned int reason, const z_arch_esf_t *pEsf)
+{
+	if (need_recover_spinlock) {
+		k_spin_release(&z_mem_domain_lock);
+
+		need_recover_spinlock = false;
+	}
+}
+
+static volatile uint8_t __aligned(MEM_REGION_ALLOC)
+	exceed_buf[MEM_REGION_ALLOC];
+
+K_MEM_PARTITION_DEFINE(exceed_part, exceed_buf, sizeof(exceed_buf),
+		      K_MEM_PARTITION_P_RW_U_RW);
+
+/**
+ * @brief Test system assert when adding memory partitions more than possible
+ *
+ * @details
+ * - Add memory partitions one by one and more than architecture allows to add.
+ * - When partitions added more than it is allowed by architecture, test that
+ *   k_mem_domain_add_partition() returns non-zero.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+void test_mem_part_assert_add_overmax(void)
+{
+	int max_parts = num_rw_parts + PARTS_USED;
+
+	/* Make sure the partitions of the domain is full, used in
+	 * previous test cases.
+	 */
+	zassert_equal(max_parts, arch_mem_domain_max_partitions_get(),
+			"domain still have room of partitions(%d).",
+			max_parts);
+
+	need_recover_spinlock = false;
+	set_fault_valid(false);
+
+	/* Add one more partition will fail due to exceeding */
+	zassert_not_equal(
+		k_mem_domain_add_partition(&test_domain, &exceed_part),
+		0, "should fail to add memory partition");
+}
+
+
+#if defined(CONFIG_ASSERT)
+static volatile uint8_t __aligned(MEM_REGION_ALLOC) misc_buf[MEM_REGION_ALLOC];
+K_MEM_PARTITION_DEFINE(find_no_part, misc_buf, sizeof(misc_buf),
+		       K_MEM_PARTITION_P_RO_U_RO);
+
+/**
+ * @brief Test error case of removing memory partition fail
+ *
+ * @details Try to remove a partition not in the domain.
+ * k_mem_domain_remove_partition() should return non-zero.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+void test_mem_domain_remove_part_fail(void)
+{
+	struct k_mem_partition *no_parts = &find_no_part;
+
+	need_recover_spinlock = false;
+	set_fault_valid(false);
+
+	zassert_not_equal(
+		k_mem_domain_remove_partition(&test_domain, no_parts),
+		0, "should fail to remove memory partition");
+}
+#else
+void test_mem_domain_remove_part_fail(void)
+{
+	ztest_test_skip();
+}
+#endif
+
+/**
+ * @brief Test error case of initializing memory domain fail
+ *
+ * @details Try to initialize a domain with invalid partition.
+ * k_mem_domain_init() should return non-zero.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+void test_mem_domain_init_fail(void)
+{
+	struct k_mem_partition *no_parts[] = {&ro_part, 0};
+
+	/* init another domain fail */
+	need_recover_spinlock = false;
+	set_fault_valid(false);
+
+	zassert_not_equal(
+		k_mem_domain_init(&test_domain_fail, ARRAY_SIZE(no_parts),
+				  no_parts),
+		0, "should fail to initialize memory domain");
 }
 
 /**
- * @brief Test system provide means to obtain names of the data and BSS sections
+ * @brief Test error case of adding null memory partition fail
  *
- * @details
- * - Define memory partition and define system memory pool using macros
- *   SYS_MEM_POOL_DEFINE
- * - Section name of the destination binary section for pool data will be
- *   obtained at build time by macros K_APP_DMEM_SECTION() which obtaines
- *   a section name.
- * - Then to check that system memory pool initialized correctly by allocating
- *   a block from it and check that it is not NULL.
+ * @details Try to add a null partition to memory domain.
+ * k_mem_domain_add_partition() should return error.
  *
  * @ingroup kernel_memprotect_tests
- *
- * @see K_APP_DMEM_SECTION()
  */
-void test_macros_obtain_names_data_bss(void)
+void test_mem_part_add_error_null(void)
 {
-	sys_mem_pool_init(&data_pool);
-	void *block;
+	/* add partition fail */
+	set_fault_valid(false);
 
-	block = sys_mem_pool_alloc(&data_pool, BLK_SIZE_MAX_MD - DESC_SIZE);
-	zassert_not_null(block, NULL);
+	zassert_not_equal(
+		k_mem_domain_add_partition(&test_domain_fail, NULL),
+		0, "should fail to add memory partition");
+}
+
+static volatile uint8_t __aligned(MEM_REGION_ALLOC) nosize_buf[MEM_REGION_ALLOC];
+K_MEM_PARTITION_DEFINE(nonsize_part, nosize_buf, sizeof(nosize_buf),
+			K_MEM_PARTITION_P_RO_U_RO);
+
+/**
+ * @brief Test error case of adding zero sized memory partition fail
+ *
+ * @details Try to add a zero sized partition to memory domain.
+ * k_mem_domain_add_partition() should return error.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+void test_mem_part_add_error_zerosize(void)
+{
+	struct k_mem_partition *nosize_part = &nonsize_part;
+
+	nosize_part->size = 0U;
+
+	/* add partition fail */
+	set_fault_valid(false);
+
+	zassert_not_equal(
+		k_mem_domain_add_partition(&test_domain_fail, nosize_part),
+		0, "should fail to add memory partition");
 }
 
 /**
- * @brief Test assigning global data and BSS variables to memory partitions
+ * @brief Test error case of memory partition address wraparound
  *
- * @details Test that system supports application assigning global data and BSS
- * variables using macros K_APP_BMEM() and K_APP_DMEM
+ * @details Try to add a partition whose address is wraparound.
+ * k_mem_domain_add_partition() should return error.
  *
  * @ingroup kernel_memprotect_tests
  */
-void test_mem_part_assign_bss_vars_zero(void)
+void test_mem_part_error_wraparound(void)
 {
-	uint32_t read_data;
-	/* The global variable part2_var will be inside the bounds of part2
-	 * and be initialized with 1356 at boot.
-	 */
-	read_data = part2_var;
-	zassert_true(read_data == 1356, NULL);
+#ifdef CONFIG_64BIT
+	K_MEM_PARTITION_DEFINE(wraparound_part, 0xfffffffffffff800, 2048,
+		       K_MEM_PARTITION_P_RO_U_RO);
+#else
+	K_MEM_PARTITION_DEFINE(wraparound_part, 0xfffff800, 2048,
+		       K_MEM_PARTITION_P_RO_U_RO);
+#endif
 
-	/* The global variable part2_zeroed_var will be inside the bounds of
-	 * part2 and must be zeroed at boot size K_APP_BMEM() was used,
-	 * indicating a BSS variable.
-	 */
-	read_data = part2_zeroed_var;
-	zassert_true(read_data == 0, NULL);
+	/* add partition fail */
+	set_fault_valid(false);
 
-	/* The global variable part2_var will be inside the bounds of
-	 * part2 and must be zeroed at boot size K_APP_BMEM() was used,
-	 * indicating a BSS variable.
-	 */
-	read_data = part2_bss_var;
-	zassert_true(read_data == 0, NULL);
+	zassert_not_equal(
+		k_mem_domain_add_partition(&test_domain_fail, &wraparound_part),
+		0, "should fail to add memory partition");
+}
+
+/**
+ * @brief Test error case of removing memory partition fail
+ *
+ * @details Try to remove a partition size mismatched will result
+ * in k_mem_domain_remove_partition() returning error.
+ *
+ * @ingroup kernel_memprotect_tests
+ */
+void test_mem_part_remove_error_zerosize(void)
+{
+	struct k_mem_partition *no_parts = &find_no_part;
+
+	zassert_equal(
+		k_mem_domain_remove_partition(&test_domain, &rw_parts[0]),
+		0, "failed to remove memory partition");
+
+	zassert_equal(
+		k_mem_domain_add_partition(&test_domain, no_parts),
+		0, "failed to add memory partition");
+
+	no_parts->size = 0U;
+
+	/* remove partition fail */
+	need_recover_spinlock = false;
+	set_fault_valid(false);
+
+	zassert_not_equal(
+		k_mem_domain_remove_partition(&test_domain, no_parts),
+		0, "should fail to remove memory partition");
 }

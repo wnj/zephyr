@@ -5,9 +5,11 @@
  */
 
 #include <string.h>
-#include <crypto/cipher.h>
-#include <logging/log.h>
+#include <zephyr/crypto/crypto.h>
+#include <zephyr/logging/log.h>
 #include <hal/nrf_ecb.h>
+
+#define DT_DRV_COMPAT nordic_nrf_ecb
 
 #define ECB_AES_KEY_SIZE   16
 #define ECB_AES_BLOCK_SIZE 16
@@ -131,13 +133,13 @@ static int nrf_ecb_session_free(const struct device *dev,
 }
 
 static const struct crypto_driver_api crypto_enc_funcs = {
-	.begin_session = nrf_ecb_session_setup,
-	.free_session = nrf_ecb_session_free,
-	.crypto_async_callback_set = NULL,
+	.cipher_begin_session = nrf_ecb_session_setup,
+	.cipher_free_session = nrf_ecb_session_free,
+	.cipher_async_callback_set = NULL,
 	.query_hw_caps = nrf_ecb_query_caps,
 };
 
-DEVICE_AND_API_INIT(nrf_ecb, CONFIG_CRYPTO_NRF_ECB_DRV_NAME,
-		    nrf_ecb_driver_init, NULL, NULL,
-		    POST_KERNEL, CONFIG_CRYPTO_INIT_PRIORITY,
-		    &crypto_enc_funcs);
+DEVICE_DT_INST_DEFINE(0, nrf_ecb_driver_init, NULL,
+		      NULL, NULL,
+		      POST_KERNEL, CONFIG_CRYPTO_INIT_PRIORITY,
+		      &crypto_enc_funcs);

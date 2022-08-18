@@ -6,17 +6,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr.h>
+#include <zephyr/zephyr.h>
 #include <stdio.h>
 #include <string.h>
 #include <zephyr/types.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/uart.h>
+#include <zephyr/toolchain.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/drivers/uart_pipe.h>
 
-#include <toolchain.h>
-#include <bluetooth/bluetooth.h>
-#include <sys/byteorder.h>
-#include <drivers/console/uart_pipe.h>
-
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 #define LOG_MODULE_NAME bttester
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
@@ -260,6 +261,55 @@ static uint8_t *recv_cb(uint8_t *buf, size_t *off)
 	return new_buf->data;
 }
 
+#if defined(CONFIG_UART_PIPE)
+/* Uart Pipe */
+static void uart_init(uint8_t *data)
+{
+	uart_pipe_register(data, BTP_MTU, recv_cb);
+}
+
+static void uart_send(uint8_t *data, size_t len)
+{
+	uart_pipe_send(data, len);
+}
+#else /* !CONFIG_UART_PIPE */
+static uint8_t *recv_buf;
+static size_t recv_off;
+static const struct device *dev;
+
+static void timer_expiry_cb(struct k_timer *timer)
+{
+	uint8_t c;
+
+	while (uart_poll_in(dev, &c) == 0) {
+		recv_buf[recv_off++] = c;
+		recv_buf = recv_cb(recv_buf, &recv_off);
+	}
+}
+
+K_TIMER_DEFINE(timer, timer_expiry_cb, NULL);
+
+/* Uart Poll */
+static void uart_init(uint8_t *data)
+{
+	dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+	__ASSERT_NO_MSG(device_is_ready(dev));
+
+	recv_buf = data;
+
+	k_timer_start(&timer, K_MSEC(10), K_MSEC(10));
+}
+
+static void uart_send(uint8_t *data, size_t len)
+{
+	int i;
+
+	for (i = 0; i < len; i++) {
+		uart_poll_out(dev, data[i]);
+	}
+}
+#endif /* CONFIG_UART_PIPE */
+
 void tester_init(void)
 {
 	int i;
@@ -275,7 +325,8 @@ void tester_init(void)
 			NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
 
 	buf = k_fifo_get(&avail_queue, K_NO_WAIT);
-	uart_pipe_register(buf->data, BTP_MTU, recv_cb);
+
+	uart_init(buf->data);
 
 	tester_send(BTP_SERVICE_ID_CORE, CORE_EV_IUT_READY, BTP_INDEX_NONE,
 		    NULL, 0);
@@ -291,9 +342,9 @@ void tester_send(uint8_t service, uint8_t opcode, uint8_t index, uint8_t *data,
 	msg.index = index;
 	msg.len = len;
 
-	uart_pipe_send((uint8_t *)&msg, sizeof(msg));
+	uart_send((uint8_t *)&msg, sizeof(msg));
 	if (data && len) {
-		uart_pipe_send(data, len);
+		uart_send(data, len);
 	}
 }
 

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr.h>
-#include <device.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/device.h>
 
 
 #define BAD_DRIVER_NAME	"bad_driver"
@@ -35,9 +35,9 @@ int bad_driver_init(const struct device *dev)
 /**
  * @cond INTERNAL_HIDDEN
  */
-DEVICE_AND_API_INIT(bad_driver, BAD_DRIVER_NAME, &bad_driver_init,
-		    NULL, NULL, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
-		    &funcs);
+DEVICE_DEFINE(bad_driver, BAD_DRIVER_NAME, &bad_driver_init,
+		NULL, NULL, NULL, POST_KERNEL,
+		CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &funcs);
 
 /**
  * @endcond

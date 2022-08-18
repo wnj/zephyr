@@ -7,16 +7,13 @@
 #define DT_DRV_COMPAT arm_mhu
 
 #include <errno.h>
-#include <device.h>
+#include <zephyr/device.h>
 #include <soc.h>
 #include "ipm_mhu.h"
 
-#define DEV_CFG(dev) \
-	((const struct ipm_mhu_device_config * const)(dev)->config)
-#define DEV_DATA(dev) \
-	((struct ipm_mhu_data *)(dev)->data)
 #define IPM_MHU_REGS(dev) \
-	((volatile struct ipm_mhu_reg_map_t *)(DEV_CFG(dev))->base)
+	((volatile struct ipm_mhu_reg_map_t *) \
+	 (((const struct ipm_mhu_device_config * const)(dev)->config)->base))
 
 static enum ipm_mhu_cpu_id_t ipm_mhu_get_cpu_id(const struct device *d)
 {
@@ -117,7 +114,7 @@ static uint32_t ipm_mhu_max_id_val_get(const struct device *d)
 
 static int ipm_mhu_init(const struct device *d)
 {
-	const struct ipm_mhu_device_config *config = DEV_CFG(d);
+	const struct ipm_mhu_device_config *config = d->config;
 
 	config->irq_config_func(d);
 
@@ -126,7 +123,7 @@ static int ipm_mhu_init(const struct device *d)
 
 static void ipm_mhu_isr(const struct device *d)
 {
-	struct ipm_mhu_data *driver_data = DEV_DATA(d);
+	struct ipm_mhu_data *driver_data = d->data;
 	enum ipm_mhu_cpu_id_t cpu_id;
 	uint32_t ipm_mhu_status;
 
@@ -159,7 +156,7 @@ static void ipm_mhu_register_cb(const struct device *d,
 				ipm_callback_t cb,
 				void *user_data)
 {
-	struct ipm_mhu_data *driver_data = DEV_DATA(d);
+	struct ipm_mhu_data *driver_data = d->data;
 
 	driver_data->callback = cb;
 	driver_data->user_data = user_data;
@@ -185,9 +182,9 @@ static struct ipm_mhu_data ipm_mhu_data_0 = {
 	.user_data = NULL,
 };
 
-DEVICE_AND_API_INIT(mhu_0,
-			DT_INST_LABEL(0),
+DEVICE_DT_INST_DEFINE(0,
 			&ipm_mhu_init,
+			NULL,
 			&ipm_mhu_data_0,
 			&ipm_mhu_cfg_0, PRE_KERNEL_1,
 			CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
@@ -199,7 +196,7 @@ static void ipm_mhu_irq_config_func_0(const struct device *d)
 	IRQ_CONNECT(DT_INST_IRQN(0),
 			DT_INST_IRQ(0, priority),
 			ipm_mhu_isr,
-			DEVICE_GET(mhu_0),
+			DEVICE_DT_INST_GET(0),
 			0);
 	irq_enable(DT_INST_IRQN(0));
 }
@@ -216,9 +213,9 @@ static struct ipm_mhu_data ipm_mhu_data_1 = {
 	.user_data = NULL,
 };
 
-DEVICE_AND_API_INIT(mhu_1,
-			DT_INST_LABEL(1),
+DEVICE_DT_INST_DEFINE(1,
 			&ipm_mhu_init,
+			NULL,
 			&ipm_mhu_data_1,
 			&ipm_mhu_cfg_1, PRE_KERNEL_1,
 			CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
@@ -230,7 +227,7 @@ static void ipm_mhu_irq_config_func_1(const struct device *d)
 	IRQ_CONNECT(DT_INST_IRQN(1),
 			DT_INST_IRQ(1, priority),
 			ipm_mhu_isr,
-			DEVICE_GET(mhu_1),
+			DEVICE_DT_INST_GET(1),
 			0);
 	irq_enable(DT_INST_IRQN(1));
 }

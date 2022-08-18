@@ -50,7 +50,6 @@
 
 &i2c0 {
 	status = "okay";
-	label = "I2C_0";
 };
 
 &pwm0 {
@@ -70,5 +69,17 @@
 };
 
 &i2s_tx {
+	status = "okay";
+};
+
+&clk0 {
+	status = "okay";
+};
+
+&clk1 {
+	status = "okay";
+};
+
+&clock0 {
 	status = "okay";
 };

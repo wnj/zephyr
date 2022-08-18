@@ -14,5 +14,7 @@ properties:
     interrupts:
       required: true
 
-    label:
+    gptfreq:
+      type: int
       required: true
+      description: gpt frequences

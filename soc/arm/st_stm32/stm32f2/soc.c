@@ -9,13 +9,14 @@
  * @brief System/hardware module for stm32f2 processor
  */
 
-#include <kernel.h>
-#include <device.h>
-#include <init.h>
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/init.h>
 #include <soc.h>
-#include <arch/cpu.h>
-#include <arch/arm/aarch32/cortex_m/cmsis.h>
-#include <linker/linker-defs.h>
+#include <zephyr/arch/cpu.h>
+#include <zephyr/arch/arm/aarch32/cortex_m/cmsis.h>
+#include <stm32_ll_system.h>
+#include <zephyr/linker/linker-defs.h>
 #include <string.h>
 
 /**
@@ -31,6 +32,10 @@ static int stm32f2_init(const struct device *arg)
 	uint32_t key;
 
 	ARG_UNUSED(arg);
+
+	/* Enable ART Flash cache accelerator for both Instruction and Data */
+	LL_FLASH_EnableInstCache();
+	LL_FLASH_EnableDataCache();
 
 	key = irq_lock();
 

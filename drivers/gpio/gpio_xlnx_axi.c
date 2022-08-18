@@ -6,13 +6,13 @@
 
 #define DT_DRV_COMPAT xlnx_xps_gpio_1_00_a
 
-#include <device.h>
-#include <drivers/gpio.h>
-#include <sys/sys_io.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/sys_io.h>
 
 #include "gpio_utils.h"
 
-/* AXI GPIO v2 register offsetd (See Xilinx PG144 for details) */
+/* AXI GPIO v2 register offsets (See Xilinx PG144 for details) */
 #define GPIO_DATA_OFFSET  0x0000
 #define GPIO_TRI_OFFSET   0x0004
 #define GPIO2_DATA_OFFSET 0x0008
@@ -281,13 +281,13 @@ static const struct gpio_driver_api gpio_xlnx_axi_driver_api = {
 		.all_outputs = DT_INST_PROP_OR(n, xlnx_all_outputs2, 0),\
 	};								\
 									\
-	DEVICE_AND_API_INIT(gpio_xlnx_axi_##n##_2,			\
-			DT_LABEL(DT_CHILD(DT_DRV_INST(n), gpio2)),	\
+	DEVICE_DT_DEFINE(DT_CHILD(DT_DRV_INST(n), gpio2),		\
 			&gpio_xlnx_axi_init,				\
+			NULL,						\
 			&gpio_xlnx_axi_##n##_2_data,			\
 			&gpio_xlnx_axi_##n##_2_config,			\
-			POST_KERNEL,					\
-			CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,		\
+			PRE_KERNEL_1,					\
+			CONFIG_GPIO_INIT_PRIORITY,			\
 			&gpio_xlnx_axi_driver_api);
 
 #define GPIO_XLNX_AXI_INIT(n)						\
@@ -309,12 +309,13 @@ static const struct gpio_driver_api gpio_xlnx_axi_driver_api = {
 		.all_outputs = DT_INST_PROP_OR(n, xlnx_all_outputs, 0),	\
 	};								\
 									\
-	DEVICE_AND_API_INIT(gpio_xlnx_axi_##n, DT_INST_LABEL(n),	\
+	DEVICE_DT_INST_DEFINE(n,					\
 			&gpio_xlnx_axi_init,				\
+			NULL,						\
 			&gpio_xlnx_axi_##n##_data,			\
 			&gpio_xlnx_axi_##n##_config,			\
-			POST_KERNEL,					\
-			CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,		\
+			PRE_KERNEL_1,					\
+			CONFIG_GPIO_INIT_PRIORITY,			\
 			&gpio_xlnx_axi_driver_api);			\
 	GPIO_XLNX_AXI_GPIO2_COND_INIT(n);
 

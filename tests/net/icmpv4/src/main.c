@@ -6,27 +6,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_test, CONFIG_NET_ICMPV4_LOG_LEVEL);
 
 #include <errno.h>
 #include <zephyr/types.h>
 #include <stddef.h>
 #include <string.h>
-#include <sys/printk.h>
-#include <linker/sections.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/linker/sections.h>
 
-#include <tc_util.h>
+#include <zephyr/tc_util.h>
 
-#include <net/buf.h>
-#include <net/ethernet.h>
-#include <net/dummy.h>
+#include <zephyr/net/buf.h>
+#include <zephyr/net/ethernet.h>
+#include <zephyr/net/dummy.h>
 
 #include "net_private.h"
 #include "icmpv4.h"
 #include "ipv4.h"
 
-#include <ztest.h>
+#include <zephyr/ztest.h>
 
 static const unsigned char icmpv4_echo_req[] = {
 	/* IPv4 Header */
@@ -263,7 +263,7 @@ static int verify_echo_reply_with_opts(struct net_pkt *pkt)
 	payload_len = sizeof(icmpv4_echo_req_opt) -
 		      NET_IPV4H_LEN - NET_ICMPH_LEN - opts_len;
 	if (payload_len != net_pkt_remaining_data(pkt)) {
-		zassert_true(false, "echo_reply_opts invalid paylaod len");
+		zassert_true(false, "echo_reply_opts invalid payload len");
 	}
 
 	ret = net_pkt_read(pkt, buf, payload_len);
@@ -305,7 +305,7 @@ static struct dummy_api net_icmpv4_if_api = {
 };
 
 NET_DEVICE_INIT(net_icmpv4_test, "net_icmpv4_test",
-		net_icmpv4_dev_init, device_pm_control_nop,
+		net_icmpv4_dev_init, NULL,
 		&net_icmpv4_context_data, NULL,
 		CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
 		&net_icmpv4_if_api, DUMMY_L2,
@@ -418,7 +418,7 @@ static void test_icmpv4(void)
 {
 	struct net_if_addr *ifaddr;
 
-	iface = net_if_get_default();
+	iface = net_if_get_first_by_type(&NET_L2_GET_NAME(DUMMY));
 	if (!iface) {
 		zassert_true(false, "Interface not available");
 	}

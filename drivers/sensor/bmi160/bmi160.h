@@ -8,10 +8,13 @@
 #ifndef ZEPHYR_DRIVERS_SENSOR_BMI160_BMI160_H_
 #define ZEPHYR_DRIVERS_SENSOR_BMI160_BMI160_H_
 
-#include <drivers/gpio.h>
-#include <drivers/sensor.h>
-#include <drivers/spi.h>
-#include <sys/util.h>
+#define DT_DRV_COMPAT bosch_bmi160
+
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/spi.h>
+#include <zephyr/sys/util.h>
 
 /* registers */
 #define BMI160_REG_CHIPID		0x00
@@ -180,7 +183,8 @@
 #define BMI160_ACC_CONF_ODR_MASK	0xF
 #define BMI160_ACC_CONF_BWP_POS		4
 #define BMI160_ACC_CONF_BWP_MASK	(0x7 << 4)
-#define BMI160_ACC_CONF_US		BIT(7)
+#define BMI160_ACC_CONF_US_POS		7
+#define BMI160_ACC_CONF_US_MASK		BIT(7)
 
 /* BMI160_REG_GYRO_CONF */
 #define BMI160_GYR_CONF_ODR_POS	0
@@ -398,11 +402,35 @@ struct bmi160_range {
 	uint8_t reg_val;
 };
 
-struct bmi160_device_config {
+#define BMI160_BUS_SPI		DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
+#define BMI160_BUS_I2C		DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c)
+
+union bmi160_bus {
+#if BMI160_BUS_SPI
+	struct spi_dt_spec spi;
+#endif
+#if BMI160_BUS_I2C
+	struct i2c_dt_spec i2c;
+#endif
+};
+
+typedef bool (*bmi160_bus_ready_fn)(const struct device *dev);
+typedef int (*bmi160_reg_read_fn)(const struct device *dev,
+				  uint8_t reg_addr, void *data, uint8_t len);
+typedef int (*bmi160_reg_write_fn)(const struct device *dev,
+				   uint8_t reg_addr, void *data, uint8_t len);
+
+struct bmi160_bus_io {
+	bmi160_bus_ready_fn ready;
+	bmi160_reg_read_fn read;
+	bmi160_reg_write_fn write;
+};
+
+struct bmi160_cfg {
+	union bmi160_bus bus;
+	const struct bmi160_bus_io *bus_io;
 #if defined(CONFIG_BMI160_TRIGGER)
-	const char *gpio_port;
-	gpio_pin_t int_pin;
-	gpio_dt_flags_t int_flags;
+	struct gpio_dt_spec interrupt;
 #endif
 };
 
@@ -439,14 +467,13 @@ union bmi160_pmu_status {
 union bmi160_sample {
 	uint8_t raw[BMI160_BUF_SIZE];
 	struct {
-		uint8_t dummy_byte;
 #if !defined(CONFIG_BMI160_GYRO_PMU_SUSPEND)
 		uint16_t gyr[BMI160_AXES];
 #endif
 #if !defined(CONFIG_BMI160_ACCEL_PMU_SUSPEND)
 		uint16_t acc[BMI160_AXES];
 #endif
-	} __packed;
+	};
 };
 
 struct bmi160_scale {
@@ -454,9 +481,8 @@ struct bmi160_scale {
 	uint16_t gyr; /* micro radians/s/lsb */
 };
 
-struct bmi160_device_data {
-	const struct device *spi;
-	struct spi_config spi_cfg;
+struct bmi160_data {
+	const struct device *bus;
 #if defined(CONFIG_BMI160_TRIGGER)
 	const struct device *dev;
 	const struct device *gpio;
@@ -486,7 +512,7 @@ struct bmi160_device_data {
 };
 
 int bmi160_read(const struct device *dev, uint8_t reg_addr,
-		uint8_t *data, uint8_t len);
+		void *data, uint8_t len);
 int bmi160_byte_read(const struct device *dev, uint8_t reg_addr,
 		     uint8_t *byte);
 int bmi160_byte_write(const struct device *dev, uint8_t reg_addr,

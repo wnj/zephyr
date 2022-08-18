@@ -8,7 +8,7 @@
 
 #define NET_LOG_LEVEL CONFIG_NET_IF_LOG_LEVEL
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_test, NET_LOG_LEVEL);
 
 #include <zephyr/types.h>
@@ -16,17 +16,17 @@ LOG_MODULE_REGISTER(net_test, NET_LOG_LEVEL);
 #include <stddef.h>
 #include <string.h>
 #include <errno.h>
-#include <sys/printk.h>
-#include <linker/sections.h>
-#include <random/rand32.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/linker/sections.h>
+#include <zephyr/random/rand32.h>
 
-#include <ztest.h>
+#include <zephyr/ztest.h>
 
-#include <net/ethernet.h>
-#include <net/dummy.h>
-#include <net/buf.h>
-#include <net/net_ip.h>
-#include <net/net_if.h>
+#include <zephyr/net/ethernet.h>
+#include <zephyr/net/dummy.h>
+#include <zephyr/net/buf.h>
+#include <zephyr/net/net_ip.h>
+#include <zephyr/net/net_if.h>
 
 #define NET_LOG_ENABLED 1
 #include "net_private.h"
@@ -150,7 +150,7 @@ NET_DEVICE_INIT_INSTANCE(net_iface1_test,
 			 "iface1",
 			 iface1,
 			 net_iface_dev_init,
-			 device_pm_control_nop,
+			 NULL,
 			 &net_iface1_data,
 			 NULL,
 			 CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
@@ -163,7 +163,7 @@ NET_DEVICE_INIT_INSTANCE(net_iface2_test,
 			 "iface2",
 			 iface2,
 			 net_iface_dev_init,
-			 device_pm_control_nop,
+			 NULL,
 			 &net_iface2_data,
 			 NULL,
 			 CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
@@ -176,7 +176,7 @@ NET_DEVICE_INIT_INSTANCE(net_iface3_test,
 			 "iface3",
 			 iface3,
 			 net_iface_dev_init,
-			 device_pm_control_nop,
+			 NULL,
 			 &net_iface3_data,
 			 NULL,
 			 CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
@@ -261,7 +261,7 @@ static int eth_fake_init(const struct device *dev)
 	return 0;
 }
 
-ETH_NET_DEVICE_INIT(eth_fake, "eth_fake", eth_fake_init, device_pm_control_nop,
+ETH_NET_DEVICE_INIT(eth_fake, "eth_fake", eth_fake_init, NULL,
 		    &eth_fake_data, NULL, CONFIG_ETH_INIT_PRIORITY,
 		    &eth_fake_api_funcs, NET_ETH_MTU);
 
@@ -363,7 +363,7 @@ static void test_iface_setup(void)
 		zassert_not_null(ifaddr, "ipv4 addr1");
 	}
 
-	/* For testing purposes we need to set the adddresses preferred */
+	/* For testing purposes we need to set the addresses preferred */
 	ifaddr->addr_state = NET_ADDR_PREFERRED;
 
 	ifaddr = net_if_ipv6_addr_add(iface1, &ll_addr,
@@ -718,6 +718,14 @@ static void test_v6_addr_add(void)
 	zassert_true(ret, "Cannot add IPv6 address");
 }
 
+static void test_v6_addr_add_mcast_twice(void)
+{
+	struct net_if_mcast_addr *maddr;
+
+	maddr = net_if_ipv6_maddr_add(iface1, &in6addr_mcast);
+	zassert_equal(maddr, NULL, "Address was added twice");
+}
+
 static void test_v6_addr_lookup(void)
 {
 	int ret;
@@ -859,6 +867,7 @@ void test_main(void)
 			 ztest_user_unit_test(test_v4_addr_lookup_user),
 			 ztest_unit_test(test_v4_addr_rm_user_from_userspace),
 			 ztest_unit_test(test_v6_addr_add),
+			 ztest_unit_test(test_v6_addr_add_mcast_twice),
 			 ztest_unit_test(test_v6_addr_lookup),
 			 ztest_unit_test(test_v6_addr_rm),
 			 ztest_unit_test(test_v6_addr_add_user_from_userspace),

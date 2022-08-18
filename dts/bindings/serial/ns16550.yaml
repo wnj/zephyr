@@ -10,7 +10,7 @@ properties:
 
     reg-shift:
       type: int
-      required: false
+      required: true
       description: quantity to shift the register offsets by
 
     pcp:
@@ -22,8 +22,3 @@ properties:
       type: int
       required: false
       description: divisor latch fraction (DLF, if supported)
-
-    pcie:
-      type: boolean
-      required: false
-      description: attached via PCI(e) bus

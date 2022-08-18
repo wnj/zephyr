@@ -8,10 +8,10 @@
 #define DT_DRV_COMPAT atmel_sam0_watchdog
 
 #include <soc.h>
-#include <drivers/watchdog.h>
+#include <zephyr/drivers/watchdog.h>
 
 #define LOG_LEVEL CONFIG_WDT_LOG_LEVEL
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(wdt_sam0);
 
 #define WDT_REGS ((Wdt *)DT_INST_REG_ADDR(0))
@@ -37,8 +37,6 @@ struct wdt_sam0_dev_data {
 	wdt_callback_t cb;
 	bool timeout_valid;
 };
-
-DEVICE_DECLARE(wdt_sam0);
 
 static struct wdt_sam0_dev_data wdt_sam0_data = { 0 };
 
@@ -272,7 +270,7 @@ static int wdt_sam0_init(const struct device *dev)
 
 	IRQ_CONNECT(DT_INST_IRQN(0),
 		    DT_INST_IRQ(0, priority), wdt_sam0_isr,
-		    DEVICE_GET(wdt_sam0), 0);
+		    DEVICE_DT_INST_GET(0), 0);
 	irq_enable(DT_INST_IRQN(0));
 
 	return 0;
@@ -280,6 +278,6 @@ static int wdt_sam0_init(const struct device *dev)
 
 static struct wdt_sam0_dev_data wdt_sam0_data;
 
-DEVICE_AND_API_INIT(wdt_sam0, DT_INST_LABEL(0), wdt_sam0_init,
+DEVICE_DT_INST_DEFINE(0, wdt_sam0_init, NULL,
 		    &wdt_sam0_data, NULL, PRE_KERNEL_1,
 		    CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &wdt_sam0_api);

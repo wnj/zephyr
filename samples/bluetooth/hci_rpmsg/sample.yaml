@@ -5,5 +5,21 @@ sample:
 tests:
   sample.bluetooth.hci_rpmsg:
     harness: bluetooth
-    platform_allow: nrf5340pdk_nrf5340_cpunet
+    platform_allow: nrf5340dk_nrf5340_cpunet
     tags: bluetooth
+    integration_platforms:
+      - nrf5340dk_nrf5340_cpunet
+  sample.bluetooth.hci_rpmsg.iso_broadcast:
+    harness: bluetooth
+    extra_args: CONF_FILE="nrf5340_cpunet_iso_broadcast.conf"
+    platform_allow: nrf5340dk_nrf5340_cpunet
+    tags: bluetooth
+    integration_platforms:
+      - nrf5340dk_nrf5340_cpunet
+  sample.bluetooth.hci_rpmsg.iso_receive:
+    harness: bluetooth
+    extra_args: CONF_FILE="nrf5340_cpunet_iso_receive.conf"
+    platform_allow: nrf5340dk_nrf5340_cpunet
+    tags: bluetooth
+    integration_platforms:
+      - nrf5340dk_nrf5340_cpunet

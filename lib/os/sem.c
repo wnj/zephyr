@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <sys/sem.h>
-#include <syscall_handler.h>
+#include <zephyr/sys/sem.h>
+#include <zephyr/syscall_handler.h>
 
 #ifdef CONFIG_USERSPACE
 #define SYS_SEM_MINIMUM      0
@@ -74,8 +74,9 @@ int sys_sem_give(struct sys_sem *sem)
 		}
 	} else if (old_value >= sem->limit) {
 		return -EAGAIN;
+	} else {
+		;
 	}
-
 	return ret;
 }
 

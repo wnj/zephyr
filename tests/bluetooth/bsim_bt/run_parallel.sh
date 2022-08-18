@@ -12,7 +12,7 @@ function display_help(){
   echo "run_parallel.sh [-help] [options]"
   echo "  Execute all cases which do not start with an _ (underscore)"
   echo "  [options] will be passed directly to the scripts"
-  echo "  The results will be saved to \${RESULTS_FILE}, by deault"
+  echo "  The results will be saved to \${RESULTS_FILE}, by default"
   echo "  ../RunResults.xml"
   echo "  Testcases are searched for in \${SEARCH_PATH}, by default this folder"
 }
@@ -28,7 +28,7 @@ fi
 err=0
 i=0
 
-SEARCH_PATH="${SEARCH_PATH:-`pwd`}"
+SEARCH_PATH="${SEARCH_PATH:-.}"
 
 #All the testcases we want to run:
 all_cases=`find ${SEARCH_PATH} -name "*.sh" | \

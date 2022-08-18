@@ -7,17 +7,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <arch/cpu.h>
-#include <drivers/gpio/gpio_mmio32.h>
-#include <init.h>
+#include <zephyr/arch/cpu.h>
+#include <zephyr/drivers/gpio/gpio_mmio32.h>
+#include <zephyr/init.h>
 #include <soc.h>
-#include <linker/linker-defs.h>
+#include <zephyr/linker/linker-defs.h>
 
 
 /* Setup GPIO drivers for accessing FPGAIO registers */
 #define FPGAIO_NODE(n) DT_INST(n, arm_mps2_fpgaio_gpio)
 #define FPGAIO_INIT(n)						\
-	GPIO_MMIO32_INIT(fpgaio_##n, DT_LABEL(FPGAIO_NODE(n)),	\
+	GPIO_MMIO32_INIT(FPGAIO_NODE(n),			\
 			DT_REG_ADDR(FPGAIO_NODE(n)),		\
 			BIT_MASK(DT_PROP(FPGAIO_NODE(n), ngpios)))
 
@@ -45,7 +45,7 @@ FPGAIO_INIT(2);
 #define CPU1_FLASH_OFFSET       (0x10000000)
 
 /**
- * @brief Wake up CPU 1 from another CPU, this is plaform specific.
+ * @brief Wake up CPU 1 from another CPU, this is platform specific.
  */
 void wakeup_cpu1(void)
 {
@@ -60,7 +60,7 @@ void wakeup_cpu1(void)
 }
 
 /**
- * @brief Get the current CPU ID, this is plaform specific.
+ * @brief Get the current CPU ID, this is platform specific.
  *
  * @return Current CPU ID
  */

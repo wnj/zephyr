@@ -9,19 +9,19 @@
 #include <errno.h>
 #include <stddef.h>
 
-#include <zephyr.h>
+#include <zephyr/zephyr.h>
 
-#include <init.h>
-#include <drivers/uart.h>
-#include <sys/util.h>
-#include <sys/byteorder.h>
-#include <debug/stack.h>
-#include <sys/printk.h>
+#include <zephyr/init.h>
+#include <zephyr/drivers/uart.h>
+#include <zephyr/sys/util.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/debug/stack.h>
+#include <zephyr/sys/printk.h>
 #include <string.h>
 
-#include <bluetooth/bluetooth.h>
-#include <bluetooth/hci.h>
-#include <drivers/bluetooth/hci_driver.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/drivers/bluetooth/hci_driver.h>
 
 #define BT_DBG_ENABLED IS_ENABLED(CONFIG_BT_DEBUG_HCI_DRIVER)
 #define LOG_MODULE_NAME bt_driver
@@ -35,8 +35,8 @@ static K_KERNEL_STACK_DEFINE(rx_stack, 256);
 static struct k_thread tx_thread_data;
 static struct k_thread rx_thread_data;
 
-static struct k_delayed_work ack_work;
-static struct k_delayed_work retx_work;
+static struct k_work_delayable ack_work;
+static struct k_work_delayable retx_work;
 
 #define HCI_3WIRE_ACK_PKT	0x00
 #define HCI_COMMAND_PKT		0x01
@@ -292,7 +292,8 @@ static void h5_send(const uint8_t *payload, uint8_t type, int len)
 
 	/* Set ACK for outgoing packet and stop delayed work */
 	H5_SET_ACK(hdr, h5.tx_ack);
-	k_delayed_work_cancel(&ack_work);
+	/* If cancel fails we may ack the same seq number twice, this is OK. */
+	(void)k_work_cancel_delayable(&ack_work);
 
 	if (reliable_packet(type)) {
 		H5_SET_RELIABLE(hdr);
@@ -334,7 +335,7 @@ static void retx_timeout(struct k_work *work)
 
 		k_fifo_init(&tmp_queue);
 
-		/* Queue to temperary queue */
+		/* Queue to temporary queue */
 		while ((buf = net_buf_get(&h5.tx_queue, K_NO_WAIT))) {
 			net_buf_put(&tmp_queue, buf);
 		}
@@ -377,7 +378,7 @@ static void h5_process_complete_packet(uint8_t *hdr)
 		/* For reliable packet increment next transmit ack number */
 		h5.tx_ack = (h5.tx_ack + 1) % 8;
 		/* Submit delayed work to ack the packet */
-		k_delayed_work_submit(&ack_work, H5_RX_ACK_TIMEOUT);
+		k_work_reschedule(&ack_work, H5_RX_ACK_TIMEOUT);
 	}
 
 	h5_print_header(hdr, "RX: >");
@@ -414,6 +415,7 @@ static void bt_uart_isr(const struct device *unused, void *user_data)
 	uint8_t byte;
 	int ret;
 	static uint8_t hdr[4];
+	size_t buf_tailroom;
 
 	ARG_UNUSED(unused);
 	ARG_UNUSED(user_data);
@@ -444,7 +446,7 @@ static void bt_uart_isr(const struct device *unused, void *user_data)
 			}
 			break;
 		case HEADER:
-			/* In a case we confuse ending slip delimeter
+			/* In a case we confuse ending slip delimiter
 			 * with starting one.
 			 */
 			if (byte == SLIP_DELIMITER) {
@@ -532,6 +534,14 @@ static void bt_uart_isr(const struct device *unused, void *user_data)
 					h5_reset_rx();
 					continue;
 				}
+			}
+
+			buf_tailroom = net_buf_tailroom(h5.rx_buf);
+			if (buf_tailroom < sizeof(byte)) {
+				BT_ERR("Not enough space in buffer %zu/%zu",
+				       sizeof(byte), buf_tailroom);
+				h5_reset_rx();
+				break;
 			}
 
 			net_buf_add_mem(h5.rx_buf, &byte, sizeof(byte));
@@ -636,7 +646,7 @@ static void tx_thread(void)
 			net_buf_put(&h5.unack_queue, buf);
 			unack_queue_len++;
 
-			k_delayed_work_submit(&retx_work, H5_TX_ACK_TIMEOUT);
+			k_work_reschedule(&retx_work, H5_TX_ACK_TIMEOUT);
 
 			break;
 		}
@@ -735,8 +745,8 @@ static void h5_init(void)
 	k_fifo_init(&h5.unack_queue);
 
 	/* Init delayed work */
-	k_delayed_work_init(&ack_work, ack_timeout);
-	k_delayed_work_init(&retx_work, retx_timeout);
+	k_work_init_delayable(&ack_work, ack_timeout);
+	k_work_init_delayable(&retx_work, retx_timeout);
 }
 
 static int h5_open(void)
@@ -768,9 +778,8 @@ static int bt_uart_init(const struct device *unused)
 {
 	ARG_UNUSED(unused);
 
-	h5_dev = device_get_binding(CONFIG_BT_UART_ON_DEV_NAME);
-
-	if (h5_dev == NULL) {
+	h5_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_bt_uart));
+	if (!device_is_ready(h5_dev)) {
 		return -EINVAL;
 	}
 

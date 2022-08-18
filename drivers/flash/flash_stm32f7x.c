@@ -5,16 +5,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <kernel.h>
-#include <device.h>
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
 #include <string.h>
-#include <drivers/flash.h>
-#include <init.h>
+#include <zephyr/drivers/flash.h>
+#include <zephyr/init.h>
 #include <soc.h>
 
 #include "flash_stm32.h"
-
-#define STM32F7X_SECTOR_MASK		((uint32_t) 0xFFFFFF07)
 
 bool flash_stm32_valid_range(const struct device *dev, off_t offset,
 			     uint32_t len,
@@ -23,6 +21,20 @@ bool flash_stm32_valid_range(const struct device *dev, off_t offset,
 	ARG_UNUSED(write);
 
 	return flash_stm32_range_exists(dev, offset, len);
+}
+
+static inline void flush_cache(FLASH_TypeDef *regs)
+{
+	if (regs->ACR & FLASH_ACR_ARTEN) {
+		regs->ACR &= ~FLASH_ACR_ARTEN;
+		/* Reference manual:
+		 * The ART cache can be flushed only if the ART accelerator
+		 * is disabled (ARTEN = 0).
+		 */
+		regs->ACR |= FLASH_ACR_ARTRST;
+		regs->ACR &= ~FLASH_ACR_ARTRST;
+		regs->ACR |= FLASH_ACR_ARTEN;
+	}
 }
 
 static int write_byte(const struct device *dev, off_t offset, uint8_t val)
@@ -87,7 +99,7 @@ static int erase_sector(const struct device *dev, uint32_t sector)
 #endif /* CONFIG_FLASH_SIZE */
 #endif /* defined(FLASH_OPTCR_nDBANK) && FLASH_SECTOR_TOTAL == 24 */
 
-	regs->CR = (regs->CR & (CR_PSIZE_MASK | STM32F7X_SECTOR_MASK)) |
+	regs->CR = (regs->CR & ~(FLASH_CR_PSIZE | FLASH_CR_SNB)) |
 		   FLASH_PSIZE_BYTE |
 		   FLASH_CR_SER |
 		   (sector << FLASH_CR_SNB_Pos) |

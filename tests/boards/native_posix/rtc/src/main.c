@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <ztest.h>
-#include <zephyr.h>
-#include <sys/printk.h>
+#include <zephyr/ztest.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/sys/printk.h>
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -99,7 +99,7 @@ static void test_realtime(void)
 				WAIT_TIME / acc_ratio,
 				TOLERANCE);
 
-		zassert_true(abs(error) < TOLERANCE,
+		zassert_true(llabs(error) < TOLERANCE,
 			     "Real time error over TOLERANCE");
 
 		/*
@@ -117,7 +117,7 @@ static void test_realtime(void)
 				error / 1000.0);
 
 		error /= 1000;
-		zassert_true(abs(error) < TOLERANCE,
+		zassert_true(llabs(error) < TOLERANCE,
 			     "PSEUDOHOSTREALTIME time error over TOLERANCE");
 
 		diff = native_rtc_gettime_us(RTC_CLOCK_BOOT) -
@@ -156,12 +156,12 @@ static void test_rtc_offset(void)
 		- start_rtc_time[1];
 
 	error = diff - offset;
-	zassert_true(abs(error) < TOLERANCE,
+	zassert_true(llabs(error) < TOLERANCE,
 		     "PSEUDOHOSTREALTIME offset error over TOLERANCE");
 
 	diff = native_rtc_gettime_us(RTC_CLOCK_REALTIME) - start_rtc_time[0];
 
-	zassert_true(diff == offset, "Offseting RTC failed\n");
+	zassert_true(diff == offset, "Offsetting RTC failed\n");
 }
 
 void test_main(void)

@@ -9,11 +9,11 @@
  * This file contains the main testing module that invokes all the tests.
  */
 
-#include <timestamp.h>
+#include <zephyr/timestamp.h>
 #include "utils.h"
-#include <tc_util.h>
+#include <zephyr/tc_util.h>
 
-#define STACK_SIZE (1024 + CONFIG_TEST_EXTRA_STACKSIZE)
+#define STACK_SIZE (1024 + CONFIG_TEST_EXTRA_STACK_SIZE)
 
 uint32_t tm_off; /* time necessary to read the time */
 int error_count; /* track number of errors */
@@ -27,6 +27,7 @@ extern int coop_ctx_switch(void);
 extern int sema_test(void);
 extern int sema_context_switch(void);
 extern int suspend_resume(void);
+extern void heap_malloc_free(void);
 
 void test_thread(void *arg1, void *arg2, void *arg3)
 {
@@ -57,6 +58,8 @@ void test_thread(void *arg1, void *arg2, void *arg3)
 
 	mutex_lock_unlock();
 
+	heap_malloc_free();
+
 	TC_END_REPORT(error_count);
 }
 
@@ -64,4 +67,5 @@ K_THREAD_DEFINE(test_thread_id, STACK_SIZE, test_thread, NULL, NULL, NULL, K_PRI
 
 void main(void)
 {
+	k_thread_join(test_thread_id, K_FOREVER);
 }

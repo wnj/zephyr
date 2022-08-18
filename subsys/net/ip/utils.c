@@ -9,21 +9,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_utils, CONFIG_NET_UTILS_LOG_LEVEL);
 
-#include <kernel.h>
+#include <zephyr/kernel.h>
 #include <stdlib.h>
-#include <syscall_handler.h>
+#include <zephyr/syscall_handler.h>
 #include <zephyr/types.h>
 #include <stdbool.h>
 #include <string.h>
 #include <errno.h>
 
-#include <net/net_ip.h>
-#include <net/net_pkt.h>
-#include <net/net_core.h>
-#include <net/socket_can.h>
+#include <zephyr/net/net_ip.h>
+#include <zephyr/net/net_pkt.h>
+#include <zephyr/net/net_core.h>
+#include <zephyr/net/socketcan.h>
 
 char *net_sprint_addr(sa_family_t af, const void *addr)
 {
@@ -87,6 +87,10 @@ char *net_sprint_ll_addr_buf(const uint8_t *ll, uint8_t ll_len,
 {
 	uint8_t i, len, blen;
 	char *ptr = buf;
+
+	if (ll == NULL) {
+		return "<unknown>";
+	}
 
 	switch (ll_len) {
 	case 8:
@@ -230,7 +234,6 @@ char *z_impl_net_addr_ntop(sa_family_t family, const void *src,
 
 		if (needcolon) {
 			*ptr++ = ':';
-			needcolon = false;
 		}
 
 		value = (uint32_t)sys_be16_to_cpu(UNALIGNED_GET(&w[i]));
@@ -448,12 +451,11 @@ int z_impl_net_addr_pton(sa_family_t family, const char *src,
 int z_vrfy_net_addr_pton(sa_family_t family, const char *src,
 			 void *dst)
 {
-	char str[INET6_ADDRSTRLEN];
+	char str[MAX(INET_ADDRSTRLEN, INET6_ADDRSTRLEN)] = {};
 	struct in6_addr addr6;
 	struct in_addr addr4;
 	void *addr;
 	size_t size;
-	size_t nlen;
 	int err;
 
 	if (family == AF_INET) {
@@ -466,16 +468,11 @@ int z_vrfy_net_addr_pton(sa_family_t family, const char *src,
 		return -EINVAL;
 	}
 
-	memset(str, 0, sizeof(str));
-
-	nlen = z_user_string_nlen((const char *)src, sizeof(str), &err);
-	if (err) {
+	if (z_user_string_copy(str, (char *)src, sizeof(str)) != 0) {
 		return -EINVAL;
 	}
 
 	Z_OOPS(Z_SYSCALL_MEMORY_WRITE(dst, size));
-	Z_OOPS(Z_SYSCALL_MEMORY_READ(src, nlen));
-	Z_OOPS(z_user_from_copy(str, (const void *)src, nlen));
 
 	err = z_impl_net_addr_pton(family, str, addr);
 	if (err) {
@@ -617,6 +614,18 @@ uint16_t net_calc_chksum_ipv4(struct net_pkt *pkt)
 }
 #endif /* CONFIG_NET_IPV4 */
 
+#if defined(CONFIG_NET_IPV4_IGMP)
+uint16_t net_calc_chksum_igmp(uint8_t *data, size_t len)
+{
+	uint16_t sum;
+
+	sum = calc_chksum(0, data, len);
+	sum = (sum == 0U) ? 0xffff : htons(sum);
+
+	return ~sum;
+}
+#endif /* CONFIG_NET_IPV4_IGMP */
+
 #if defined(CONFIG_NET_IPV6) || defined(CONFIG_NET_IPV4)
 static bool convert_port(const char *buf, uint16_t *port)
 {
@@ -711,13 +720,11 @@ static bool parse_ipv6(const char *str, size_t str_len,
 		net_sin6(addr)->sin6_port = htons(port);
 
 		NET_DBG("IPv6 host %s port %d",
-			log_strdup(net_addr_ntop(AF_INET6, addr6,
-						 ipaddr, sizeof(ipaddr) - 1)),
+			net_addr_ntop(AF_INET6, addr6, ipaddr, sizeof(ipaddr) - 1),
 			port);
 	} else {
 		NET_DBG("IPv6 host %s",
-			log_strdup(net_addr_ntop(AF_INET6, addr6,
-						 ipaddr, sizeof(ipaddr) - 1)));
+			net_addr_ntop(AF_INET6, addr6, ipaddr, sizeof(ipaddr) - 1));
 	}
 
 	return true;
@@ -788,8 +795,7 @@ static bool parse_ipv4(const char *str, size_t str_len,
 	net_sin(addr)->sin_port = htons(port);
 
 	NET_DBG("IPv4 host %s port %d",
-		log_strdup(net_addr_ntop(AF_INET, addr4,
-					 ipaddr, sizeof(ipaddr) - 1)),
+		net_addr_ntop(AF_INET, addr4, ipaddr, sizeof(ipaddr) - 1),
 		port);
 	return true;
 }

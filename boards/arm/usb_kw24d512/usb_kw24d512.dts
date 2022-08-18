@@ -3,6 +3,7 @@
 /dts-v1/;
 
 #include <nxp/nxp_kw2xd.dtsi>
+#include "usb_kw24d512-pinctrl.dtsi"
 
 / {
 	model = "NXP USB-KW24D512 board";
@@ -20,6 +21,7 @@
 		zephyr,console = &uart0;
 		zephyr,shell-uart = &uart0;
 		zephyr,uart-pipe = &uart0;
+		zephyr,ieee802154 = &ieee802154;
 	};
 
 	leds {
@@ -56,22 +58,14 @@
 	status = "okay";
 };
 
-&i2c0 {
-	status = "okay";
-};
-
-&ftm1 {
-	status = "okay";
-	compatible = "nxp,kinetis-ftm-pwm";
-	#pwm-cells = <3>;
-};
-
 &uart0 {
 	status = "okay";
 	current-speed = <115200>;
+	pinctrl-0 = <&uart0_default>;
+	pinctrl-names = "default";
 };
 
-&usbd {
+zephyr_udc0: &usbd {
 	compatible = "nxp,kinetis-usbd";
 	status = "okay";
 	num-bidir-endpoints = <8>;
@@ -94,5 +88,9 @@
 };
 
 &gpioe {
+	status = "okay";
+};
+
+&ieee802154 {
 	status = "okay";
 };

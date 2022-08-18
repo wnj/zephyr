@@ -6,14 +6,15 @@
 
 #define DT_DRV_COMPAT ti_cc13xx_cc26xx_trng
 
-#include <kernel.h>
-#include <device.h>
-#include <drivers/entropy.h>
-#include <irq.h>
-#include <power/power.h>
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/entropy.h>
+#include <zephyr/irq.h>
+#include <zephyr/pm/policy.h>
+#include <zephyr/pm/device.h>
 
-#include <sys/ring_buffer.h>
-#include <sys/sys_io.h>
+#include <zephyr/sys/ring_buffer.h>
+#include <zephyr/sys/sys_io.h>
 
 #include <driverlib/prcm.h>
 #include <driverlib/trng.h>
@@ -31,22 +32,11 @@ struct entropy_cc13xx_cc26xx_data {
 	struct k_sem sync;
 	struct ring_buf pool;
 	uint8_t data[CONFIG_ENTROPY_CC13XX_CC26XX_POOL_SIZE];
-#ifdef CONFIG_SYS_POWER_MANAGEMENT
+#ifdef CONFIG_PM
 	Power_NotifyObj post_notify;
 	bool constrained;
 #endif
-#ifdef CONFIG_DEVICE_POWER_MANAGEMENT
-	uint32_t pm_state;
-#endif
 };
-
-DEVICE_DECLARE(entropy_cc13xx_cc26xx);
-
-static inline struct entropy_cc13xx_cc26xx_data *
-get_dev_data(const struct device *dev)
-{
-	return dev->data;
-}
 
 static void start_trng(struct entropy_cc13xx_cc26xx_data *data)
 {
@@ -73,7 +63,7 @@ static void start_trng(struct entropy_cc13xx_cc26xx_data *data)
 	TRNGIntEnable(TRNG_NUMBER_READY | TRNG_FRO_SHUTDOWN);
 }
 
-#ifdef CONFIG_DEVICE_POWER_MANAGEMENT
+#ifdef CONFIG_PM_DEVICE
 static void stop_trng(struct entropy_cc13xx_cc26xx_data *data)
 {
 	TRNGDisable();
@@ -104,15 +94,14 @@ static int entropy_cc13xx_cc26xx_get_entropy(const struct device *dev,
 					     uint8_t *buf,
 					     uint16_t len)
 {
-	struct entropy_cc13xx_cc26xx_data *data = get_dev_data(dev);
+	struct entropy_cc13xx_cc26xx_data *data = dev->data;
 	uint32_t cnt;
 
-#if defined(CONFIG_SYS_POWER_MANAGEMENT) && \
-	defined(CONFIG_SYS_POWER_SLEEP_STATES)
+#ifdef CONFIG_PM
 	unsigned int key = irq_lock();
 
 	if (!data->constrained) {
-		sys_pm_ctrl_disable_state(SYS_POWER_STATE_SLEEP_2);
+		pm_policy_state_lock_get(PM_STATE_STANDBY, PM_ALL_SUBSTATES);
 		data->constrained = true;
 	}
 	irq_unlock(key);
@@ -136,9 +125,9 @@ static int entropy_cc13xx_cc26xx_get_entropy(const struct device *dev,
 	return 0;
 }
 
-static void entropy_cc13xx_cc26xx_isr(const void *arg)
+static void entropy_cc13xx_cc26xx_isr(const struct device *dev)
 {
-	struct entropy_cc13xx_cc26xx_data *data = get_dev_data(arg);
+	struct entropy_cc13xx_cc26xx_data *data = dev->data;
 	uint32_t src = 0;
 	uint32_t cnt;
 	uint32_t num[2];
@@ -155,11 +144,11 @@ static void entropy_cc13xx_cc26xx_isr(const void *arg)
 
 		/* When pool is full disable interrupt and stop reading numbers */
 		if (cnt != sizeof(num)) {
-#if defined(CONFIG_SYS_POWER_MANAGEMENT) && \
-	defined(CONFIG_SYS_POWER_SLEEP_STATES)
+#ifdef CONFIG_PM
 			if (data->constrained) {
-				sys_pm_ctrl_enable_state(
-					SYS_POWER_STATE_SLEEP_2);
+				pm_policy_state_lock_put(
+					PM_STATE_STANDBY,
+					PM_ALL_SUBSTATES);
 				data->constrained = false;
 			}
 #endif
@@ -169,8 +158,8 @@ static void entropy_cc13xx_cc26xx_isr(const void *arg)
 		k_sem_give(&data->sync);
 	}
 
-	/* Change the shutdown FROs' oscillating frequncy in an attempt to
-	 * prevent further locking on to the sampling clock frequncy.
+	/* Change the shutdown FROs' oscillating frequency in an attempt to
+	 * prevent further locking on to the sampling clock frequency.
 	 */
 	if (src & TRNG_FRO_SHUTDOWN) {
 		handle_shutdown_ovf();
@@ -181,7 +170,7 @@ static int entropy_cc13xx_cc26xx_get_entropy_isr(const struct device *dev,
 						 uint8_t *buf, uint16_t len,
 						 uint32_t flags)
 {
-	struct entropy_cc13xx_cc26xx_data *data = get_dev_data(dev);
+	struct entropy_cc13xx_cc26xx_data *data = dev->data;
 	uint16_t cnt;
 	uint16_t read = len;
 	uint32_t src;
@@ -241,7 +230,7 @@ static int entropy_cc13xx_cc26xx_get_entropy_isr(const struct device *dev,
 	return read;
 }
 
-#ifdef CONFIG_SYS_POWER_MANAGEMENT
+#ifdef CONFIG_PM
 /*
  *  ======== post_notify_fxn ========
  *  Called by Power module when waking up the CPU from Standby. The TRNG needs
@@ -261,7 +250,7 @@ static int post_notify_fxn(unsigned int eventType, uintptr_t eventArg,
 
 		if (Power_getDependencyCount(res_id) != 0) {
 			/* Reconfigure and enable TRNG only if powered */
-			start_trng(get_dev_data(dev));
+			start_trng(dev->data);
 		}
 	}
 
@@ -269,78 +258,41 @@ static int post_notify_fxn(unsigned int eventType, uintptr_t eventArg,
 }
 #endif
 
-#ifdef CONFIG_DEVICE_POWER_MANAGEMENT
-static int entropy_cc13xx_cc26xx_set_power_state(const struct device *dev,
-						 uint32_t new_state)
+#ifdef CONFIG_PM_DEVICE
+static int entropy_cc13xx_cc26xx_pm_action(const struct device *dev,
+					   enum pm_device_action action)
 {
-	struct entropy_cc13xx_cc26xx_data *data = get_dev_data(dev);
-	int ret = 0;
+	struct entropy_cc13xx_cc26xx_data *data = dev->data;
 
-	if ((new_state == DEVICE_PM_ACTIVE_STATE) &&
-		(new_state != data->pm_state)) {
+	switch (action) {
+	case PM_DEVICE_ACTION_RESUME:
 		Power_setDependency(PowerCC26XX_PERIPH_TRNG);
 		start_trng(data);
-	} else {
-		__ASSERT_NO_MSG(new_state == DEVICE_PM_LOW_POWER_STATE ||
-			new_state == DEVICE_PM_SUSPEND_STATE ||
-			new_state == DEVICE_PM_OFF_STATE);
-
-		if (data->pm_state == DEVICE_PM_ACTIVE_STATE) {
-			stop_trng(data);
-			Power_releaseDependency(PowerCC26XX_PERIPH_TRNG);
-		}
+		break;
+	case PM_DEVICE_ACTION_SUSPEND:
+		stop_trng(data);
+		Power_releaseDependency(PowerCC26XX_PERIPH_TRNG);
+		break;
+	default:
+		return -ENOTSUP;
 	}
-	data->pm_state = new_state;
 
-	return ret;
+	return 0;
 }
-
-static int entropy_cc13xx_cc26xx_pm_control(const struct device *dev,
-					    uint32_t ctrl_command,
-					    void *context, device_pm_cb cb,
-					    void *arg)
-{
-	struct entropy_cc13xx_cc26xx_data *data = get_dev_data(dev);
-	int ret = 0;
-
-	if (ctrl_command == DEVICE_PM_SET_POWER_STATE) {
-		uint32_t new_state = *((const uint32_t *)context);
-
-		if (new_state != data->pm_state) {
-			ret = entropy_cc13xx_cc26xx_set_power_state(dev,
-				new_state);
-		}
-	} else {
-		__ASSERT_NO_MSG(ctrl_command == DEVICE_PM_GET_POWER_STATE);
-		*((uint32_t *)context) = data->pm_state;
-	}
-
-	if (cb) {
-		cb(dev, ret, context, arg);
-	}
-
-	return ret;
-}
-#endif /* CONFIG_DEVICE_POWER_MANAGEMENT */
+#endif /* CONFIG_PM_DEVICE */
 
 static int entropy_cc13xx_cc26xx_init(const struct device *dev)
 {
-	struct entropy_cc13xx_cc26xx_data *data = get_dev_data(dev);
-
-#ifdef CONFIG_DEVICE_POWER_MANAGEMENT
-	get_dev_data(dev)->pm_state = DEVICE_PM_ACTIVE_STATE;
-#endif
+	struct entropy_cc13xx_cc26xx_data *data = dev->data;
 
 	/* Initialize driver data */
 	ring_buf_init(&data->pool, sizeof(data->data), data->data);
 
-#if defined(CONFIG_SYS_POWER_MANAGEMENT)
+#if defined(CONFIG_PM)
 	Power_setDependency(PowerCC26XX_PERIPH_TRNG);
-#if defined(CONFIG_SYS_POWER_SLEEP_STATES)
 	/* Stay out of standby until buffer is filled with entropy */
-	sys_pm_ctrl_disable_state(SYS_POWER_STATE_SLEEP_2);
+	pm_policy_state_lock_get(PM_STATE_STANDBY, PM_ALL_SUBSTATES);
 	data->constrained = true;
-#endif
 	/* Register notification function */
 	Power_registerNotify(&data->post_notify,
 		PowerCC26XX_AWAKE_STANDBY,
@@ -365,7 +317,7 @@ static int entropy_cc13xx_cc26xx_init(const struct device *dev)
 	}
 
 	/* Peripherals should not be accessed until power domain is on. */
-	while (PRCMPowerDomainStatus(PRCM_DOMAIN_PERIPH) !=
+	while (PRCMPowerDomainsAllOn(PRCM_DOMAIN_PERIPH) !=
 	       PRCM_DOMAIN_POWER_ON) {
 		continue;
 	}
@@ -376,7 +328,7 @@ static int entropy_cc13xx_cc26xx_init(const struct device *dev)
 	IRQ_CONNECT(DT_INST_IRQN(0),
 		    DT_INST_IRQ(0, priority),
 		    entropy_cc13xx_cc26xx_isr,
-		    DEVICE_GET(entropy_cc13xx_cc26xx), 0);
+		    DEVICE_DT_INST_GET(0), 0);
 	irq_enable(DT_INST_IRQN(0));
 
 	return 0;
@@ -392,16 +344,11 @@ static struct entropy_cc13xx_cc26xx_data entropy_cc13xx_cc26xx_data = {
 	.sync = Z_SEM_INITIALIZER(entropy_cc13xx_cc26xx_data.sync, 0, 1),
 };
 
-#ifdef CONFIG_DEVICE_POWER_MANAGEMENT
-DEVICE_DEFINE(entropy_cc13xx_cc26xx, DT_INST_LABEL(0),
+PM_DEVICE_DT_INST_DEFINE(0, entropy_cc13xx_cc26xx_pm_action);
+
+DEVICE_DT_INST_DEFINE(0,
 		entropy_cc13xx_cc26xx_init,
-		entropy_cc13xx_cc26xx_pm_control,
+		PM_DEVICE_DT_INST_GET(0),
 		&entropy_cc13xx_cc26xx_data, NULL,
-		PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		PRE_KERNEL_1, CONFIG_ENTROPY_INIT_PRIORITY,
 		&entropy_cc13xx_cc26xx_driver_api);
-#else
-DEVICE_AND_API_INIT(entropy_cc13xx_cc26xx, DT_INST_LABEL(0),
-		    entropy_cc13xx_cc26xx_init, &entropy_cc13xx_cc26xx_data,
-		    NULL, PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
-		    &entropy_cc13xx_cc26xx_driver_api);
-#endif

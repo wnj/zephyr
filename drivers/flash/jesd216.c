@@ -6,7 +6,7 @@
 
 
 #include <sys/types.h>
-#include <kernel.h>
+#include <zephyr/kernel.h>
 #include "jesd216.h"
 #include "spi_nor.h"
 
@@ -167,7 +167,7 @@ int jesd216_bfp_erase_type_times(const struct jesd216_param_header *php,
 	 *
 	 * The entries start with ET1 at bit 4.  The low four bits
 	 * encode a value that is offset and scaled to produce a
-	 * multipler to convert from typical time to maximum time.
+	 * multiplier to convert from typical time to maximum time.
 	 */
 	unsigned int count = 1 + ((dw10 >> (4 + (idx - 1) * 7)) & 0x1F);
 	unsigned int units = ((dw10 >> (4 + 5 + (idx - 1) * 7)) & 0x03);
@@ -283,6 +283,47 @@ int jesd216_bfp_decode_dw14(const struct jesd216_param_header *php,
 	res->exit_delay_ns = value;
 
 	res->poll_options = (dw14 >> 2) & 0x3F;
+
+	return 0;
+}
+
+int jesd216_bfp_decode_dw15(const struct jesd216_param_header *php,
+			    const struct jesd216_bfp *bfp,
+			    struct jesd216_bfp_dw15 *res)
+{
+	/* DW15 introduced in JESD216A */
+	if (php->len_dw < 15) {
+		return -ENOTSUP;
+	}
+
+	uint32_t dw15 = sys_le32_to_cpu(bfp->dw10[5]);
+
+	res->hold_reset_disable = (dw15 & BIT(23)) != 0U;
+	res->qer = (dw15 >> 20) & 0x07;
+	res->entry_044 = (dw15 >> 16) & 0x0F;
+	res->exit_044 = (dw15 >> 10) & 0x3F;
+	res->support_044 = (dw15 & BIT(9)) != 0U;
+	res->enable_444 = (dw15 >> 4) & 0x1F;
+	res->disable_444 = (dw15 >> 0) & 0x0F;
+
+	return 0;
+}
+
+int jesd216_bfp_decode_dw16(const struct jesd216_param_header *php,
+			    const struct jesd216_bfp *bfp,
+			    struct jesd216_bfp_dw16 *res)
+{
+	/* DW16 introduced in JESD216A */
+	if (php->len_dw < 16) {
+		return -ENOTSUP;
+	}
+
+	uint32_t dw16 = sys_le32_to_cpu(bfp->dw10[6]);
+
+	res->enter_4ba = (dw16 >> 24) & 0xFF;
+	res->exit_4ba = (dw16 >> 14) & 0x3FF;
+	res->srrs_support = (dw16 >> 8) & 0x3F;
+	res->sr1_interface = (dw16 >> 0) & 0x7F;
 
 	return 0;
 }

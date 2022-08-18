@@ -10,22 +10,22 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#include <zephyr.h>
-#include <sys/byteorder.h>
-#include <logging/log.h>
-#include <debug/stack.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/debug/stack.h>
 
-#include <device.h>
-#include <init.h>
-#include <drivers/gpio.h>
-#include <drivers/spi.h>
+#include <zephyr/device.h>
+#include <zephyr/init.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/spi.h>
 
-#include <net/buf.h>
-#include <bluetooth/bluetooth.h>
-#include <bluetooth/l2cap.h>
-#include <bluetooth/hci.h>
-#include <bluetooth/buf.h>
-#include <bluetooth/hci_raw.h>
+#include <zephyr/net/buf.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/l2cap.h>
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/buf.h>
+#include <zephyr/bluetooth/hci_raw.h>
 
 #define LOG_MODULE_NAME hci_spi
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
@@ -48,9 +48,6 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 #define PACKET_TYPE            0
 #define EVT_BLUE_INITIALIZED   0x01
 
-#define GPIO_IRQ_PIN           DT_GPIO_PIN(DT_INST(0, zephyr_bt_hci_spi_slave), irq_gpios)
-#define GPIO_IRQ_FLAGS         DT_GPIO_FLAGS(DT_INST(0, zephyr_bt_hci_spi_slave), irq_gpios)
-
 /* Needs to be aligned with the SPI master buffer size */
 #define SPI_MAX_MSG_LEN        255
 
@@ -71,11 +68,32 @@ const static struct spi_buf_set tx_bufs = {
 /* HCI buffer pools */
 #define CMD_BUF_SIZE BT_BUF_RX_SIZE
 
-static const struct device *spi_hci_dev;
+/*
+ * This finds an arbitrary node with compatible
+ * "zephyr,bt-hci-spi-slave". There should just be one in the
+ * devicetree.
+ *
+ * If for some reason you have more than one of these in your
+ * devicetree, replace this macro definition to pick one, e.g. using
+ * DT_NODELABEL().
+ */
+#define HCI_SPI_NODE           DT_COMPAT_GET_ANY_STATUS_OKAY(zephyr_bt_hci_spi_slave)
+
+/*
+ * This is the SPI bus controller device used to exchange data with
+ * the SPI-based BT controller.
+ */
+static const struct device *spi_hci_dev = DEVICE_DT_GET(DT_BUS(HCI_SPI_NODE));
 static struct spi_config spi_cfg = {
 	.operation = SPI_WORD_SET(8) | SPI_OP_MODE_SLAVE,
 };
-static const struct device *gpio_dev;
+
+/*
+ * The GPIO used to send interrupts to the host,
+ * configured in the 'irq-gpios' property in HCI_SPI_NODE.
+ */
+static const struct gpio_dt_spec irq = GPIO_DT_SPEC_GET(HCI_SPI_NODE, irq_gpios);
+
 static K_THREAD_STACK_DEFINE(bt_tx_thread_stack, CONFIG_BT_HCI_TX_STACK_SIZE);
 static struct k_thread bt_tx_thread_data;
 
@@ -111,7 +129,7 @@ static inline int spi_send(struct net_buf *buf)
 	}
 	header_slave[STATUS_HEADER_TOREAD] = buf->len;
 
-	gpio_pin_set(gpio_dev, GPIO_IRQ_PIN, 1);
+	gpio_pin_set(irq.port, irq.pin, 1);
 
 	/* Coordinate transfer lock with the spi rx thread */
 	k_sem_take(&sem_spi_tx, K_FOREVER);
@@ -136,7 +154,7 @@ static inline int spi_send(struct net_buf *buf)
 	}
 	net_buf_unref(buf);
 
-	gpio_pin_set(gpio_dev, GPIO_IRQ_PIN, 0);
+	gpio_pin_set(irq.port, irq.pin, 0);
 	k_sem_give(&sem_spi_rx);
 
 	return 0;
@@ -247,24 +265,21 @@ static int hci_spi_init(const struct device *unused)
 
 	LOG_DBG("");
 
-	spi_hci_dev = device_get_binding(DT_BUS_LABEL(DT_INST(0, zephyr_bt_hci_spi_slave)));
-	if (!spi_hci_dev) {
+	if (!device_is_ready(spi_hci_dev)) {
+		LOG_ERR("SPI bus %s is not ready", spi_hci_dev->name);
 		return -EINVAL;
 	}
 
-	gpio_dev = device_get_binding(
-		DT_GPIO_LABEL(DT_INST(0, zephyr_bt_hci_spi_slave), irq_gpios));
-	if (!gpio_dev) {
+	if (!device_is_ready(irq.port)) {
+		LOG_ERR("IRQ GPIO port %s is not ready", irq.port->name);
 		return -EINVAL;
 	}
-	gpio_pin_configure(gpio_dev, GPIO_IRQ_PIN,
-			   GPIO_OUTPUT_INACTIVE | GPIO_IRQ_FLAGS);
+	gpio_pin_configure_dt(&irq, GPIO_OUTPUT_INACTIVE);
 
 	return 0;
 }
 
-DEVICE_INIT(hci_spi, "hci_spi", &hci_spi_init, NULL, NULL,
-	    APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);
+SYS_INIT(hci_spi_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);
 
 void main(void)
 {

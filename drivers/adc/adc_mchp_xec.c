@@ -7,10 +7,10 @@
 #define DT_DRV_COMPAT microchip_xec_adc
 
 #define LOG_LEVEL CONFIG_ADC_LOG_LEVEL
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(adc_mchp_xec);
 
-#include <drivers/adc.h>
+#include <zephyr/drivers/adc.h>
 #include <soc.h>
 #include <errno.h>
 
@@ -50,9 +50,6 @@ struct adc_xec_regs {
 
 #define ADC_XEC_REG_BASE						\
 	((struct adc_xec_regs *)(DT_INST_REG_ADDR(0)))
-
-
-DEVICE_DECLARE(adc_xec);
 
 static void adc_context_start_sampling(struct adc_context *ctx)
 {
@@ -281,10 +278,17 @@ struct adc_driver_api adc_xec_api = {
 	.ref_internal = XEC_ADC_VREF_ANALOG,
 };
 
+/* ADC Config Register */
+#define XEC_ADC_CFG_CLK_VAL(clk_time)	(		\
+	(clk_time << MCHP_ADC_CFG_CLK_LO_TIME_POS) |	\
+	(clk_time << MCHP_ADC_CFG_CLK_HI_TIME_POS))
+
 static int adc_xec_init(const struct device *dev)
 {
 	struct adc_xec_regs *adc_regs = ADC_XEC_REG_BASE;
 	struct adc_xec_data *data = dev->data;
+
+	adc_regs->config_reg = XEC_ADC_CFG_CLK_VAL(DT_INST_PROP(0, clktime));
 
 	adc_regs->control_reg =  XEC_ADC_CTRL_ACTIVATE
 		| XEC_ADC_CTRL_POWER_SAVER_DIS
@@ -296,7 +300,7 @@ static int adc_xec_init(const struct device *dev)
 
 	IRQ_CONNECT(DT_INST_IRQN(0),
 		    DT_INST_IRQ(0, priority),
-		    adc_xec_isr, DEVICE_GET(adc_xec), 0);
+		    adc_xec_isr, DEVICE_DT_INST_GET(0), 0);
 	irq_enable(DT_INST_IRQN(0));
 
 	adc_context_unlock_unconditionally(&data->ctx);
@@ -310,7 +314,7 @@ static struct adc_xec_data adc_xec_dev_data_0 = {
 	ADC_CONTEXT_INIT_SYNC(adc_xec_dev_data_0, ctx),
 };
 
-DEVICE_AND_API_INIT(adc_xec, DT_INST_LABEL(0),
-		    adc_xec_init, &adc_xec_dev_data_0, NULL,
-		    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+DEVICE_DT_INST_DEFINE(0, adc_xec_init, NULL,
+		    &adc_xec_dev_data_0, NULL,
+		    PRE_KERNEL_1, CONFIG_ADC_INIT_PRIORITY,
 		    &adc_xec_api);

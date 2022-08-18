@@ -8,8 +8,8 @@
 #define DT_DRV_COMPAT openisa_rv32m1_pinmux
 
 #include <errno.h>
-#include <device.h>
-#include <drivers/pinmux.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/pinmux.h>
 
 #include <fsl_common.h>
 #include <fsl_clock.h>
@@ -75,8 +75,9 @@ static const struct pinmux_driver_api pinmux_rv32m1_driver_api = {
 		.clock_ip_name = INST_DT_CLOCK_IP_NAME(n),		\
 	};								\
 									\
-	DEVICE_AND_API_INIT(pinmux_rv32m1_##n, DT_INST_LABEL(n),	\
+	DEVICE_DT_INST_DEFINE(n,					\
 			    &pinmux_rv32m1_init,			\
+			    NULL,					\
 			    NULL, &pinmux_rv32m1_##n##_config,		\
 			    PRE_KERNEL_1,				\
 			    CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,	\

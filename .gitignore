@@ -7,8 +7,11 @@
 *.swp
 *.swo
 *~
+.\#*
+\#*\#
 build*/
-!doc/guides/build
+!doc/build/
+!scripts/build
 !tests/drivers/build_all
 cscope.*
 .dir
@@ -32,6 +35,7 @@ doc/samples
 doc/latex
 doc/themes/zephyr-docs-theme
 sanity-out*
+twister-out*
 bsim_bt_out
 scripts/grub
 doc/reference/kconfig/*.rst
@@ -41,6 +45,14 @@ doc/doc.warnings
 .envrc
 .vscode
 hide-defaults-note
+venv
+.venv
+.DS_Store
+.clangd
+
+# CI output
+compliance.xml
+_error.types
 
 # Tag files
 GPATH

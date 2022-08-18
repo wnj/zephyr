@@ -4,13 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <device.h>
-#include <init.h>
+#include <zephyr/device.h>
+#include <zephyr/init.h>
 #include <soc.h>
-#include <kernel.h>
-#include <arch/cpu.h>
-#include <arch/arm/aarch32/cortex_m/cmsis.h>
+#include <zephyr/kernel.h>
+#include <zephyr/arch/cpu.h>
+#include <zephyr/arch/arm/aarch32/cortex_m/cmsis.h>
 
+/* MEC devices IDs with special PLL handling */
+#define MCHP_GCFG_DID_DEV_ID_MEC150x    0x0020U
+#define MCHP_TRIM_ENABLE_INT_OSCILLATOR 0x06U
 
 /*
  * Make sure PCR sleep enables are clear except for crypto
@@ -35,8 +38,12 @@ static int soc_pcr_init(void)
  * External single ended crystal connected to XTAL2 pin.
  * External 32KHz square wave from Host chipset/board on 32KHZ_IN pin.
  * NOTES:
- *   PLL can take up to 3 ms to lock. Before lock the PLL output
- *   will be ramping up from ~20MHz.
+ *   FW Program new value to VBAT CLK32 Enable register.
+ *   HW if new value != current value
+ *   HW endif
+ *   FW spin until PCR PLL lock is set.
+ *   32K stable and PLL locked.
+ *   PLL POR or clock source change can take up to 3ms to lock.
  *   32KHZ_IN pin must be configured for 32KHZ_IN function.
  *   Crystals vary and may take longer time to stabilize this will
  *   affect PLL lock time.
@@ -48,24 +55,12 @@ static int soc_pcr_init(void)
  */
 static void clk32_change(uint8_t new_clk32)
 {
-	new_clk32 &= MCHP_VBATR_CLKEN_MASK;
+	/* Program new value. */
+	VBATR_REGS->CLK32_EN = new_clk32 & MCHP_VBATR_CLKEN_MASK;
 
-	if ((VBATR_REGS->CLK32_EN & MCHP_VBATR_CLKEN_MASK)
-		== (uint32_t)new_clk32) {
-		return;
-	}
-
-	if (new_clk32 == MCHP_VBATR_USE_SIL_OSC) {
-		VBATR_REGS->CLK32_EN = new_clk32;
-	} else {
-		/* 1. switch to internal oscillator */
-		VBATR_REGS->CLK32_EN = MCHP_VBATR_USE_SIL_OSC;
-		/* 2. delay for PLL */
-		while ((PCR_REGS->OSC_ID & MCHP_PCR_OSC_ID_PLL_LOCK) == 0)
-			;
-		/* 3. switch to desired source */
-		VBATR_REGS->CLK32_EN = new_clk32;
-	}
+	/* Wait for PLL lock. HW state machine is configuring PLL. */
+	while ((PCR_REGS->OSC_ID & MCHP_PCR_OSC_ID_PLL_LOCK) == 0)
+		;
 }
 
 static int soc_clk32_init(void)
@@ -87,9 +82,12 @@ static int soc_clk32_init(void)
 	/* Use internal 32KHz +/-2% silicon oscillator
 	 * if required performed OTP value override
 	 */
-	if (MCHP_REVISION_ID() == MCHP_GCFG_REV_B0) {
-		VBATR_REGS->CKK32_TRIM = 0x06;
+	if (MCHP_DEVICE_ID() == MCHP_GCFG_DID_DEV_ID_MEC150x) {
+		if (MCHP_REVISION_ID() == MCHP_GCFG_REV_B0) {
+			VBATR_REGS->CKK32_TRIM = MCHP_TRIM_ENABLE_INT_OSCILLATOR;
+		}
 	}
+
 	new_clk32 = MCHP_VBATR_USE_SIL_OSC;
 #endif
 	clk32_change(new_clk32);
@@ -149,7 +147,7 @@ static int soc_init(const struct device *dev)
 	 * On HW reset PCR Processor Clock Divider = 4 for 48/4 = 12 MHz.
 	 * Set clock divider = 1 for maximum speed.
 	 * NOTE1: This clock divider affects all Cortex-M4 core clocks.
-	 * If you change it you must repogram SYSTICK to maintain the
+	 * If you change it you must reprogram SYSTICK to maintain the
 	 * same absolute time interval.
 	 */
 	PCR_REGS->PROC_CLK_CTRL = CONFIG_SOC_MEC1501_PROC_CLK_DIV;

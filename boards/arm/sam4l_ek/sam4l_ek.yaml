@@ -9,5 +9,8 @@ toolchain:
   - gnuarmemb
   - xtools
 supported:
+  - gpio
+  - i2c
   - spi
   - usart
+  - usb_device

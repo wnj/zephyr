@@ -86,6 +86,10 @@ struct e1000_dev {
 	uint8_t mac[ETH_ALEN];
 	uint8_t txb[NET_ETH_MTU];
 	uint8_t rxb[NET_ETH_MTU];
+#if defined(CONFIG_ETH_E1000_PTP_CLOCK)
+	const struct device *ptp_clock;
+	float clk_ratio;
+#endif
 };
 
 static const char *e1000_reg_to_string(enum e1000_reg_t r)
@@ -94,7 +98,7 @@ static const char *e1000_reg_to_string(enum e1000_reg_t r)
 #define iow32(_dev, _reg, _val) do {					\
 	LOG_DBG("iow32 %s 0x%08x", e1000_reg_to_string(_reg), (_val)); 	\
 	sys_write32(_val, (_dev)->address + (_reg));			\
-} while (0)
+} while (false)
 
 #define ior32(_dev, _reg)						\
 ({									\

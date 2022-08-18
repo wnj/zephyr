@@ -7,6 +7,8 @@
 #ifndef _NUVOTON_NPCX_SOC_GPIO_H_
 #define _NUVOTON_NPCX_SOC_GPIO_H_
 
+#include <zephyr/device.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -22,7 +24,23 @@ extern "C" {
  * @retval Pointer to structure device
  * @retval NULL Invalid parameter of GPIO port index
  */
-const struct device *soc_get_gpio_dev(int port);
+const struct device *npcx_get_gpio_dev(int port);
+
+/**
+ * @brief Enable the connection between io pads and GPIO instance
+ *
+ * @param dev Pointer to device structure for the gpio driver instance.
+ * @param pin Pin number.
+ */
+void npcx_gpio_enable_io_pads(const struct device *dev, int pin);
+
+/**
+ * @brief Disable the connection between io pads and GPIO instance
+ *
+ * @param dev Pointer to device structure for the gpio driver instance.
+ * @param pin Pin number.
+ */
+void npcx_gpio_disable_io_pads(const struct device *dev, int pin);
 
 #ifdef __cplusplus
 }

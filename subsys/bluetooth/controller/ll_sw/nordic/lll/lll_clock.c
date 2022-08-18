@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr/types.h>
 #include <soc.h>
-#include <device.h>
-#include <drivers/clock_control.h>
-#include <drivers/clock_control/nrf_clock_control.h>
+#include <zephyr/device.h>
+
+#include <zephyr/drivers/clock_control.h>
+#include <zephyr/drivers/clock_control/nrf_clock_control.h>
 
 #define BT_DBG_ENABLED IS_ENABLED(CONFIG_BT_DEBUG_HCI_DRIVER)
 #define LOG_MODULE_NAME bt_ctlr_lll_clock
@@ -64,12 +64,37 @@ int lll_clock_init(void)
 	return onoff_request(mgr, &lf_cli);
 }
 
-int lll_clock_wait(void)
+int lll_clock_deinit(void)
 {
 	struct onoff_manager *mgr =
 		z_nrf_clock_control_get_onoff(CLOCK_CONTROL_NRF_SUBSYS_LF);
 
-	return blocking_on(mgr, LFCLOCK_TIMEOUT_MS);
+	return onoff_release(mgr);
+}
+
+int lll_clock_wait(void)
+{
+	struct onoff_manager *mgr;
+	static bool done;
+	int err;
+
+	if (done) {
+		return 0;
+	}
+	done = true;
+
+	mgr = z_nrf_clock_control_get_onoff(CLOCK_CONTROL_NRF_SUBSYS_LF);
+	err = blocking_on(mgr, LFCLOCK_TIMEOUT_MS);
+	if (err) {
+		return err;
+	}
+
+	err = onoff_release(mgr);
+	if (err != ONOFF_STATE_ON) {
+		return -EIO;
+	}
+
+	return 0;
 }
 
 int lll_hfclock_on(void)

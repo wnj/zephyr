@@ -12,9 +12,9 @@
 
 #include <errno.h>
 #include <soc.h>
-#include <drivers/watchdog.h>
-#include <sys/printk.h>
-#include <power/reboot.h>
+#include <zephyr/drivers/watchdog.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/sys/reboot.h>
 
 struct wdog_cmsdk_apb {
 	/* offset: 0x000 (r/w) watchdog load register */
@@ -199,8 +199,9 @@ static int wdog_cmsdk_apb_init(const struct device *dev)
 	return 0;
 }
 
-DEVICE_AND_API_INIT(wdog_cmsdk_apb, DT_INST_LABEL(0),
+DEVICE_DT_INST_DEFINE(0,
 		    wdog_cmsdk_apb_init,
+		    NULL,
 		    NULL, NULL,
 		    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		    &wdog_cmsdk_apb_api);

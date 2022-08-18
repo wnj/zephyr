@@ -4,24 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <kernel.h>
-#include <device.h>
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
 #include <string.h>
-#include <drivers/flash.h>
+#include <zephyr/drivers/flash.h>
 #include <errno.h>
-#include <init.h>
+#include <zephyr/init.h>
 #include <soc.h>
 #include "flash_priv.h"
 
 #include "fsl_common.h"
-#ifdef CONFIG_HAS_MCUX_IAP
-#include "fsl_iap.h"
-#else
-#include "fsl_flash.h"
-#endif
 
 #define LOG_LEVEL CONFIG_FLASH_LOG_LEVEL
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(flash_mcux);
 
 
@@ -31,11 +26,22 @@ LOG_MODULE_REGISTER(flash_mcux);
 #define DT_DRV_COMPAT nxp_kinetis_ftfe
 #elif DT_NODE_HAS_STATUS(DT_INST(0, nxp_kinetis_ftfl), okay)
 #define DT_DRV_COMPAT nxp_kinetis_ftfl
-#elif DT_NODE_HAS_STATUS(DT_INST(0, nxp_lpc_iap), okay)
-#define DT_DRV_COMPAT nxp_lpc_iap
+#elif DT_NODE_HAS_STATUS(DT_INST(0, nxp_iap_fmc55), okay)
+#define DT_DRV_COMPAT nxp_iap_fmc55
+#define SOC_HAS_IAP 1
+#elif DT_NODE_HAS_STATUS(DT_INST(0, nxp_iap_fmc553), okay)
+#define DT_DRV_COMPAT nxp_iap_fmc553
+#define SOC_HAS_IAP 1
 #else
 #error No matching compatible for soc_flash_mcux.c
 #endif
+
+#ifdef SOC_HAS_IAP
+#include "fsl_iap.h"
+#else
+#include "fsl_flash.h"
+#endif /* SOC_HAS_IAP */
+
 
 #define SOC_NV_FLASH_NODE DT_INST(0, soc_nv_flash)
 
@@ -144,7 +150,7 @@ static int flash_mcux_erase(const struct device *dev, off_t offset,
 	status_t rc;
 	unsigned int key;
 
-	if (k_sem_take(&priv->write_lock, K_NO_WAIT)) {
+	if (k_sem_take(&priv->write_lock, K_FOREVER)) {
 		return -EACCES;
 	}
 
@@ -209,7 +215,7 @@ static int flash_mcux_write(const struct device *dev, off_t offset,
 	status_t rc;
 	unsigned int key;
 
-	if (k_sem_take(&priv->write_lock, K_NO_WAIT)) {
+	if (k_sem_take(&priv->write_lock, K_FOREVER)) {
 		return -EACCES;
 	}
 
@@ -222,20 +228,6 @@ static int flash_mcux_write(const struct device *dev, off_t offset,
 	k_sem_give(&priv->write_lock);
 
 	return (rc == kStatus_Success) ? 0 : -EINVAL;
-}
-
-static int flash_mcux_write_protection(const struct device *dev, bool enable)
-{
-	struct flash_priv *priv = dev->data;
-	int rc = 0;
-
-	if (enable) {
-		rc = k_sem_take(&priv->write_lock, K_FOREVER);
-	} else {
-		k_sem_give(&priv->write_lock);
-	}
-
-	return rc;
 }
 
 #if defined(CONFIG_FLASH_PAGE_LAYOUT)
@@ -265,7 +257,6 @@ flash_mcux_get_parameters(const struct device *dev)
 static struct flash_priv flash_data;
 
 static const struct flash_driver_api flash_mcux_api = {
-	.write_protection = flash_mcux_write_protection,
 	.erase = flash_mcux_erase,
 	.write = flash_mcux_write,
 	.read = flash_mcux_read,
@@ -281,11 +272,11 @@ static int flash_mcux_init(const struct device *dev)
 	uint32_t pflash_block_base;
 	status_t rc;
 
-	k_sem_init(&priv->write_lock, 0, 1);
+	k_sem_init(&priv->write_lock, 1, 1);
 
 	rc = FLASH_Init(&priv->config);
 
-#ifdef CONFIG_HAS_MCUX_IAP
+#ifdef SOC_HAS_IAP
 	FLASH_GetProperty(&priv->config, kFLASH_PropertyPflashBlockBaseAddr,
 			  &pflash_block_base);
 #else
@@ -297,6 +288,6 @@ static int flash_mcux_init(const struct device *dev)
 	return (rc == kStatus_Success) ? 0 : -EIO;
 }
 
-DEVICE_AND_API_INIT(flash_mcux, DT_INST_LABEL(0),
-			flash_mcux_init, &flash_data, NULL, POST_KERNEL,
-			CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &flash_mcux_api);
+DEVICE_DT_INST_DEFINE(0, flash_mcux_init, NULL,
+			&flash_data, NULL, POST_KERNEL,
+			CONFIG_FLASH_INIT_PRIORITY, &flash_mcux_api);

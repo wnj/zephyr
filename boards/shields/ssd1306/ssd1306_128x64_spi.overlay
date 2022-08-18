@@ -4,13 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/ {
+	chosen {
+		zephyr,display = &ssd1306;
+	};
+};
+
 &arduino_spi {
 	status = "okay";
 
-	ssd1306@0 {
+	ssd1306: ssd1306@0 {
 		compatible = "solomon,ssd1306fb";
 		reg = <0x0>;
-		label = "SSD1306";
 		spi-max-frequency = <10000000>;
 		width = <128>;
 		height = <64>;
@@ -21,6 +26,7 @@
 		segment-remap;
 		com-invdir;
 		prechargep = <0x22>;
-		data_cmd-gpios = <&arduino_header 16 0>;
+		data_cmd-gpios = <&arduino_header 15 0>;
+		/* reset-gpios = <&arduino_header 14 GPIO_ACTIVE_LOW>; */
 	};
 };

@@ -5,16 +5,17 @@
  */
 #include <xtensa-asm2-s.h>
 #include <offsets.h>
+#include <zephyr/toolchain.h>
+#include <zsr.h>
 
 /*
  * xtensa_spill_reg_windows
  *
- * Globally visible symbol to do register spills.  Useful for unit
- * testing, or maybe as part of a debug/watchdog/error handler.  Not a
- * C function, call this via CALL0 (so you probably have to save off
- * A0, but no other registers need to be spilled).  On return, all
- * registers not part of the current function will be spilled to
- * memory.
+ * Spill all register windows.  Not a C function, enter this via CALL0
+ * (so you have to save off A0, but no other registers need to be
+ * spilled).  On return, all registers not part of the current
+ * function will be spilled to memory.  The WINDOWSTART SR will have a
+ * single 1 bit corresponding to the current frame at WINDOWBASE.
  */
 .global xtensa_spill_reg_windows
 .align 4
@@ -38,10 +39,10 @@ xtensa_save_high_regs:
 	 * by duplicating the bits twice and shifting down by WINDOWBASE
 	 * bits.  Now the LSB is the register quad at WINDOWBASE.
 	 */
-	rsr.WINDOWSTART a2
+	rsr a2, WINDOWSTART
 	slli a3, a2, (XCHAL_NUM_AREGS / 4)
 	or a2, a2, a3
-	rsr.WINDOWBASE a3
+	rsr a3, WINDOWBASE
 	ssr a3
 	srl a2, a2
 
@@ -140,33 +141,35 @@ _high_restore_done:
  * RFI levels do the same thing and differ only in the special
  * registers used to hold PC/PS, but Qemu has been observed to behave
  * strangely when RFI doesn't "return" to a INTLEVEL strictly lower
- * than it started from.  So pick level 6 (the highest that works on
- * Qemu, hardware doesn't care so it doesn't matter).  In theory we
- * should test to be able to support hardware with less than 6 levels,
- * though...
+ * than it started from.  So we leverage the zsr.h framework to pick
+ * the highest level available for our specific platform.
  */
 .global _restore_context
 _restore_context:
 	call0 xtensa_restore_high_regs
 
 	l32i a0, a1, BSA_PC_OFF
-	wsr.EPC6 a0
+	wsr a0, ZSR_EPC
 	l32i a0, a1, BSA_PS_OFF
-	wsr.EPS6 a0
+	wsr a0, ZSR_EPS
 
 	l32i a0, a1, BSA_SAR_OFF
-	wsr.SAR a0
+	wsr a0, SAR
 #if XCHAL_HAVE_LOOPS
 	l32i a0, a1, BSA_LBEG_OFF
-	wsr.LBEG a0
+	wsr a0, LBEG
 	l32i a0, a1, BSA_LEND_OFF
-	wsr.LEND a0
+	wsr a0, LEND
 	l32i a0, a1, BSA_LCOUNT_OFF
-	wsr.LCOUNT a0
+	wsr a0, LCOUNT
 #endif
 #if XCHAL_HAVE_S32C1I
 	l32i a0, a1, BSA_SCOMPARE1_OFF
-	wsr.SCOMPARE1 a0
+	wsr a0, SCOMPARE1
+#endif
+#if XCHAL_HAVE_THREADPTR && defined(CONFIG_THREAD_LOCAL_STORAGE)
+	l32i a0, a1, BSA_THREADPTR_OFF
+	wur a0, THREADPTR
 #endif
 	rsync
 
@@ -175,12 +178,28 @@ _restore_context:
 	l32i a3, a1, BSA_A3_OFF
 	addi a1, a1, BASE_SAVE_AREA_SIZE
 
-	rfi 6
+	rfi ZSR_RFI_LEVEL
+
+/*
+ * void xtensa_arch_except(int reason_p);
+ *
+ * Implements hardware exception for Xtensa ARCH_EXCEPT to save
+ * interrupted stack frame and reason_p for use in exception handler
+ * and coredump
+ */
+.global xtensa_arch_except
+.global xtensa_arch_except_epc
+.align 4
+xtensa_arch_except:
+	entry a1, 16
+xtensa_arch_except_epc:
+	ill
+	retw
 
 /*
  * void xtensa_switch(void *new, void **old_return);
  *
- * Context switches into the prevoiusly-saved "new" handle, placing
+ * Context switches into the previously-saved "new" handle, placing
  * the saved "old" handle into the address provided by old_return.
  */
 .global xtensa_switch
@@ -202,13 +221,27 @@ xtensa_switch:
 	ODD_REG_SAVE
 
 	/* Stash our PS register contents and a "restore" PC. */
-	rsr.PS a0
+	rsr a0, PS
 	s32i a0, a1, BSA_PS_OFF
 	movi a0, _switch_restore_pc
 	s32i a0, a1, BSA_PC_OFF
 
 	/* Now the high registers */
 	call0 xtensa_save_high_regs
+
+#ifdef CONFIG_KERNEL_COHERENCE
+	/* Flush the stack.  The top of stack was stored for us by
+	 * arch_cohere_stacks().  It can be NULL for a dummy thread.
+	 */
+	rsr a0, ZSR_FLUSH
+	beqz a0, noflush
+	mov a3, a1
+flushloop:
+	dhwb a3, 0
+	addi a3, a3, XCHAL_DCACHE_LINESIZE
+	blt a3, a0, flushloop
+noflush:
+#endif
 
 	/* Restore the A3 argument we spilled earlier (via the base
 	 * save pointer pushed at the bottom of the stack) and set the
@@ -225,8 +258,8 @@ xtensa_switch:
 	 */
 	l32i a1, a2, BSA_A2_OFF
 
-#ifdef CONFIG_TRACING
-	call4 sys_trace_thread_switched_in
+#ifdef CONFIG_INSTRUMENT_THREAD_SWITCHING
+	call4 z_thread_mark_switched_in
 #endif
 	j _restore_context
 _switch_restore_pc:
@@ -238,7 +271,7 @@ _switch_restore_pc:
  */
 .align 4
 _handle_excint:
-	EXCINT_HANDLER CONFIG_XTENSA_KERNEL_CPU_PTR_SR, ___cpu_t_nested_OFFSET, ___cpu_t_irq_stack_OFFSET
+	EXCINT_HANDLER ZSR_CPU, ___cpu_t_nested_OFFSET, ___cpu_t_irq_stack_OFFSET
 
 /* Define the actual vectors for the hardware-defined levels with
  * DEF_EXCINT.  These load a C handler address and jump to our handler
@@ -248,27 +281,43 @@ _handle_excint:
 DEF_EXCINT 1, _handle_excint, xtensa_excint1_c
 
 #if XCHAL_NMILEVEL >= 2
+#if !(defined(CONFIG_GDBSTUB) && (XCHAL_DEBUGLEVEL == 2))
 DEF_EXCINT 2, _handle_excint, xtensa_int2_c
+#endif
 #endif
 
 #if XCHAL_NMILEVEL >= 3
+#if !(defined(CONFIG_GDBSTUB) && (XCHAL_DEBUGLEVEL == 3))
 DEF_EXCINT 3, _handle_excint, xtensa_int3_c
+#endif
 #endif
 
 #if XCHAL_NMILEVEL >= 4
+#if !(defined(CONFIG_GDBSTUB) && (XCHAL_DEBUGLEVEL == 4))
 DEF_EXCINT 4, _handle_excint, xtensa_int4_c
+#endif
 #endif
 
 #if XCHAL_NMILEVEL >= 5
+#if !(defined(CONFIG_GDBSTUB) && (XCHAL_DEBUGLEVEL == 5))
 DEF_EXCINT 5, _handle_excint, xtensa_int5_c
+#endif
 #endif
 
 #if XCHAL_NMILEVEL >= 6
+#if !(defined(CONFIG_GDBSTUB) && (XCHAL_DEBUGLEVEL == 6))
 DEF_EXCINT 6, _handle_excint, xtensa_int6_c
+#endif
 #endif
 
 #if XCHAL_NMILEVEL >= 7
+#if !(defined(CONFIG_GDBSTUB) && (XCHAL_DEBUGLEVEL == 7))
 DEF_EXCINT 7, _handle_excint, xtensa_int7_c
+#endif
+#endif
+
+#if defined(CONFIG_GDBSTUB)
+DEF_EXCINT XCHAL_DEBUGLEVEL, _handle_excint, xtensa_debugint_c
 #endif
 
 /* The user exception vector is defined here, as we need to handle
@@ -280,18 +329,18 @@ DEF_EXCINT 7, _handle_excint, xtensa_int7_c
  * to save these five cycles during other exceptions and L1
  * interrupts.  Maybe revisit at some point, with better benchmarking.
  * Note that _xt_alloca_exc is Xtensa-authored code which expects A0
- * to have been saved to EXCSAVE1, which is an unfortunate ABI given
- * that Zephyr code otherwise does not use the EXCSAVE registers.
+ * to have been saved to EXCSAVE1, we've modified it to use the zsr.h
+ * API to get assigned a scratch register.
  */
 .pushsection .UserExceptionVector.text, "ax"
 .global _Level1RealVector
 _Level1RealVector:
-	wsr.excsave1 a0
+	wsr a0, ZSR_ALLOCA
 	rsr.exccause a0
 	bnei a0, EXCCAUSE_ALLOCA, _not_alloca
 	j _xt_alloca_exc
 _not_alloca:
-	rsr.excsave1 a0
+	rsr a0, ZSR_ALLOCA
 	j _Level1Vector
 .popsection
 

@@ -12,12 +12,12 @@
  * for the Nordic Semiconductor nRF52 family processor.
  */
 
-#include <kernel.h>
-#include <init.h>
-#include <arch/arm/aarch32/cortex_m/cmsis.h>
+#include <zephyr/kernel.h>
+#include <zephyr/init.h>
+#include <zephyr/arch/arm/aarch32/cortex_m/cmsis.h>
 #include <hal/nrf_power.h>
 #include <soc/nrfx_coredep.h>
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 
 #ifdef CONFIG_RUNTIME_NMI
 extern void z_arm_nmi_init(void);
@@ -71,6 +71,9 @@ static int nordicsemi_nrf52_init(const struct device *arg)
 #if defined(CONFIG_SOC_DCDC_NRF52X)
 	nrf_power_dcdcen_set(NRF_POWER, true);
 #endif
+#if NRF_POWER_HAS_DCDCEN_VDDH && defined(CONFIG_SOC_DCDC_NRF52X_HV)
+	nrf_power_dcdcen_vddh_set(NRF_POWER, true);
+#endif
 
 	/* Install default handler that simply resets the CPU
 	* if configured in the kernel, NOP otherwise
@@ -85,11 +88,6 @@ static int nordicsemi_nrf52_init(const struct device *arg)
 void arch_busy_wait(uint32_t time_us)
 {
 	nrfx_coredep_delay_us(time_us);
-}
-
-void z_platform_init(void)
-{
-	SystemInit();
 }
 
 SYS_INIT(nordicsemi_nrf52_init, PRE_KERNEL_1, 0);

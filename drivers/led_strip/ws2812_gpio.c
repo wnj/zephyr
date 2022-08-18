@@ -1,45 +1,34 @@
 /*
  * Copyright (c) 2018 Intel Corporation
  * Copyright (c) 2019 Nordic Semiconductor ASA
+ * Copyright (c) 2021 Seagate Technology LLC
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #define DT_DRV_COMPAT worldsemi_ws2812_gpio
 
-#include <drivers/led_strip.h>
+#include <zephyr/drivers/led_strip.h>
 
 #include <string.h>
 
 #define LOG_LEVEL CONFIG_LED_STRIP_LOG_LEVEL
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(ws2812_gpio);
 
-#include <zephyr.h>
+#include <zephyr/zephyr.h>
 #include <soc.h>
-#include <drivers/gpio.h>
-#include <device.h>
-#include <drivers/clock_control.h>
-#include <drivers/clock_control/nrf_clock_control.h>
-
-struct ws2812_gpio_data {
-	const struct device *gpio;
-};
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/clock_control.h>
+#include <zephyr/drivers/clock_control/nrf_clock_control.h>
+#include <zephyr/dt-bindings/led/led.h>
 
 struct ws2812_gpio_cfg {
-	uint8_t pin;
-	bool has_white;
+	struct gpio_dt_spec in_gpio;
+	uint8_t num_colors;
+	const uint8_t *color_mapping;
 };
-
-static struct ws2812_gpio_data *dev_data(const struct device *dev)
-{
-	return dev->data;
-}
-
-static const struct ws2812_gpio_cfg *dev_cfg(const struct device *dev)
-{
-	return dev->config;
-}
 
 /*
  * This is hard-coded to nRF51 in two ways:
@@ -69,7 +58,7 @@ static const struct ws2812_gpio_cfg *dev_cfg(const struct device *dev)
  * We should be able to make this portable using the results of
  * https://github.com/zephyrproject-rtos/zephyr/issues/11917.
  *
- * We already have the GPIO device stashed in ws2812_gpio_data, so
+ * We already have the GPIO device stashed in ws2812_gpio_config, so
  * this driver can be used as a test case for the optimized API.
  *
  * Per Arm docs, both Rd and Rn must be r0-r7, so we use the "l"
@@ -86,7 +75,7 @@ static const struct ws2812_gpio_cfg *dev_cfg(const struct device *dev)
 			DELAY_TxL			\
 			::				\
 			[r] "l" (base),		\
-			[p] "l" (pin)); } while (0)
+			[p] "l" (pin)); } while (false)
 
 /* Send out a 0 bit's pulse */
 #define ZERO_BIT(base, pin) do {			\
@@ -96,12 +85,13 @@ static const struct ws2812_gpio_cfg *dev_cfg(const struct device *dev)
 			DELAY_TxL			\
 			::				\
 			[r] "l" (base),		\
-			[p] "l" (pin)); } while (0)
+			[p] "l" (pin)); } while (false)
 
 static int send_buf(const struct device *dev, uint8_t *buf, size_t len)
 {
+	const struct ws2812_gpio_cfg *config = dev->config;
 	volatile uint32_t *base = (uint32_t *)&NRF_GPIO->OUTSET;
-	const uint32_t val = BIT(dev_cfg(dev)->pin);
+	const uint32_t val = BIT(config->in_gpio.pin);
 	struct onoff_manager *mgr =
 		z_nrf_clock_control_get_onoff(CLOCK_CONTROL_NRF_SUBSYS_HF);
 	struct onoff_client cli;
@@ -158,25 +148,35 @@ static int ws2812_gpio_update_rgb(const struct device *dev,
 				  size_t num_pixels)
 {
 	const struct ws2812_gpio_cfg *config = dev->config;
-	const bool has_white = config->has_white;
 	uint8_t *ptr = (uint8_t *)pixels;
 	size_t i;
 
-	/* Convert from RGB to on-wire format (GRB or GRBW) */
+	/* Convert from RGB to on-wire format (e.g. GRB, GRBW, RGB, etc) */
 	for (i = 0; i < num_pixels; i++) {
-		uint8_t r = pixels[i].r;
-		uint8_t g = pixels[i].g;
-		uint8_t b = pixels[i].b;
+		uint8_t j;
 
-		*ptr++ = g;
-		*ptr++ = r;
-		*ptr++ = b;
-		if (has_white) {
-			*ptr++ = 0; /* white channel is unused */
+		for (j = 0; j < config->num_colors; j++) {
+			switch (config->color_mapping[j]) {
+			/* White channel is not supported by LED strip API. */
+			case LED_COLOR_ID_WHITE:
+				*ptr++ = 0;
+				break;
+			case LED_COLOR_ID_RED:
+				*ptr++ = pixels[i].r;
+				break;
+			case LED_COLOR_ID_GREEN:
+				*ptr++ = pixels[i].g;
+				break;
+			case LED_COLOR_ID_BLUE:
+				*ptr++ = pixels[i].b;
+				break;
+			default:
+				return -EINVAL;
+			}
 		}
 	}
 
-	return send_buf(dev, (uint8_t *)pixels, num_pixels * (has_white ? 4 : 3));
+	return send_buf(dev, (uint8_t *)pixels, num_pixels * config->num_colors);
 }
 
 static int ws2812_gpio_update_channels(const struct device *dev,
@@ -192,53 +192,65 @@ static const struct led_strip_driver_api ws2812_gpio_api = {
 	.update_channels = ws2812_gpio_update_channels,
 };
 
-#define WS2812_GPIO_LABEL(idx) \
-	(DT_INST_LABEL(idx))
-#define WS2812_GPIO_HAS_WHITE(idx) \
-	(DT_INST_PROP(idx, has_white_channel) == 1)
-#define WS2812_GPIO_DEV(idx) \
-	(DT_INST_GPIO_LABEL(idx, in_gpios))
-#define WS2812_GPIO_PIN(idx) \
-	(DT_INST_GPIO_PIN(idx, in_gpios))
-#define WS2812_GPIO_FLAGS(idx) \
-	(DT_INST_GPIO_FLAGS(idx, in_gpios))
+/*
+ * Retrieve the channel to color mapping (e.g. RGB, BGR, GRB, ...) from the
+ * "color-mapping" DT property.
+ */
+#define WS2812_COLOR_MAPPING(idx)					\
+static const uint8_t ws2812_gpio_##idx##_color_mapping[] =		\
+	DT_INST_PROP(idx, color_mapping)
+
+#define WS2812_NUM_COLORS(idx) (DT_INST_PROP_LEN(idx, color_mapping))
+
 /*
  * The inline assembly above is designed to work on nRF51 devices with
  * the 16 MHz clock enabled.
  *
  * TODO: try to make this portable, or at least port to more devices.
  */
-#define WS2812_GPIO_CLK(idx) DT_LABEL(DT_INST(0, nordic_nrf_clock))
 
 #define WS2812_GPIO_DEVICE(idx)					\
 									\
 	static int ws2812_gpio_##idx##_init(const struct device *dev)	\
 	{								\
-		struct ws2812_gpio_data *data = dev_data(dev);		\
+		const struct ws2812_gpio_cfg *cfg = dev->config;	\
+		uint8_t i;						\
 									\
-		data->gpio = device_get_binding(WS2812_GPIO_DEV(idx));	\
-		if (!data->gpio) {					\
-			LOG_ERR("Unable to find GPIO controller %s",	\
-				WS2812_GPIO_DEV(idx));			\
-			return -ENODEV;				\
+		if (!device_is_ready(cfg->in_gpio.port)) {		\
+			LOG_ERR("GPIO device not ready");		\
+			return -ENODEV;					\
 		}							\
 									\
-		return gpio_pin_configure(data->gpio,			\
-					  WS2812_GPIO_PIN(idx),	\
-					  WS2812_GPIO_FLAGS(idx) |	\
-					  GPIO_OUTPUT);		\
+		for (i = 0; i < cfg->num_colors; i++) {			\
+			switch (cfg->color_mapping[i]) {		\
+			case LED_COLOR_ID_WHITE:			\
+			case LED_COLOR_ID_RED:				\
+			case LED_COLOR_ID_GREEN:			\
+			case LED_COLOR_ID_BLUE:				\
+				break;					\
+			default:					\
+				LOG_ERR("%s: invalid channel to color mapping." \
+					" Check the color-mapping DT property",	\
+					dev->name);			\
+				return -EINVAL;				\
+			}						\
+		}							\
+									\
+		return gpio_pin_configure_dt(&cfg->in_gpio, GPIO_OUTPUT); \
 	}								\
 									\
-	static struct ws2812_gpio_data ws2812_gpio_##idx##_data;	\
+	WS2812_COLOR_MAPPING(idx);					\
 									\
 	static const struct ws2812_gpio_cfg ws2812_gpio_##idx##_cfg = { \
-		.pin = WS2812_GPIO_PIN(idx),				\
-		.has_white = WS2812_GPIO_HAS_WHITE(idx),		\
+		.in_gpio = GPIO_DT_SPEC_INST_GET(idx, in_gpios),	\
+		.num_colors = WS2812_NUM_COLORS(idx),			\
+		.color_mapping = ws2812_gpio_##idx##_color_mapping,	\
 	};								\
 									\
-	DEVICE_AND_API_INIT(ws2812_gpio_##idx, WS2812_GPIO_LABEL(idx),	\
+	DEVICE_DT_INST_DEFINE(idx,					\
 			    ws2812_gpio_##idx##_init,			\
-			    &ws2812_gpio_##idx##_data,			\
+			    NULL,					\
+			    NULL,					\
 			    &ws2812_gpio_##idx##_cfg, POST_KERNEL,	\
 			    CONFIG_LED_STRIP_INIT_PRIORITY,		\
 			    &ws2812_gpio_api);

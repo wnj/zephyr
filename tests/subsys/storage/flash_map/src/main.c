@@ -6,17 +6,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <ztest.h>
-#include <drivers/flash.h>
-#include <storage/flash_map.h>
+#include <zephyr/ztest.h>
+#include <zephyr/drivers/flash.h>
+#include <zephyr/storage/flash_map.h>
 
 extern int flash_map_entries;
 struct flash_sector fs_sectors[256];
 
+ZTEST(flash_map, test_flash_area_disabled_device)
+{
+	const struct flash_area *fa;
+	int rc;
+
+	/* Test that attempting to open a disabled flash area fails */
+	rc = flash_area_open(FLASH_AREA_ID(disabled_a), &fa);
+	zassert_equal(rc, -ENODEV, "Open did not fail");
+	rc = flash_area_open(FLASH_AREA_ID(disabled_b), &fa);
+	zassert_equal(rc, -ENODEV, "Open did not fail");
+}
+
 /**
  * @brief Test flash_area_get_sectors()
  */
-void test_flash_area_get_sectors(void)
+ZTEST(flash_map, test_flash_area_get_sectors)
 {
 	const struct flash_area *fa;
 	uint32_t sec_cnt;
@@ -26,22 +38,19 @@ void test_flash_area_get_sectors(void)
 	uint8_t wd[256];
 	uint8_t rd[256];
 	const struct device *flash_dev;
+	const struct device *flash_dev_a = FLASH_AREA_DEVICE(image_1);
 
 	rc = flash_area_open(FLASH_AREA_ID(image_1), &fa);
 	zassert_true(rc == 0, "flash_area_open() fail");
 
 	/* First erase the area so it's ready for use. */
-	flash_dev =
-		device_get_binding(DT_CHOSEN_ZEPHYR_FLASH_CONTROLLER_LABEL);
+	flash_dev = flash_area_get_device(fa);
 
-	rc = flash_write_protection_set(flash_dev, false);
-	zassert_false(rc, "failed to disable flash write protection");
+	/* Device obtained by label should match the one from fa object */
+	zassert_equal(flash_dev, flash_dev_a, "Device for image_1 do not match");
 
 	rc = flash_erase(flash_dev, fa->fa_off, fa->fa_size);
 	zassert_true(rc == 0, "flash area erase fail");
-
-	rc = flash_write_protection_set(flash_dev, true);
-	zassert_false(rc, "failed to enable flash write protection");
 
 	(void)memset(wd, 0xa5, sizeof(wd));
 
@@ -63,7 +72,6 @@ void test_flash_area_get_sectors(void)
 		rc = memcmp(wd, rd, sizeof(wd));
 		zassert_true(rc == 0, "read data != write data");
 
-		(void) flash_write_protection_set(flash_dev, false);
 		/* write stuff to end of area */
 		rc = flash_write(flash_dev, fa->fa_off + off +
 					    fs_sectors[i].fs_size - sizeof(wd),
@@ -97,9 +105,10 @@ void test_flash_area_get_sectors(void)
 		zassert_true(rc == 0, "area not erased");
 	}
 
+	flash_area_close(fa);
 }
 
-void test_flash_area_check_int_sha256(void)
+ZTEST(flash_map, test_flash_area_check_int_sha256)
 {
 	/* echo $'0123456789abcdef\nfedcba98765432' > tst.sha
 	 * hexdump tst.sha
@@ -158,11 +167,24 @@ void test_flash_area_check_int_sha256(void)
 	flash_area_close(fa);
 }
 
-void test_main(void)
+ZTEST(flash_map, test_flash_area_erased_val)
 {
-	ztest_test_suite(test_flash_map,
-			 ztest_unit_test(test_flash_area_get_sectors),
-			 ztest_unit_test(test_flash_area_check_int_sha256)
-			);
-	ztest_run_test_suite(test_flash_map);
+	const struct flash_parameters *param;
+	const struct flash_area *fa;
+	uint8_t val;
+	int rc;
+
+	rc = flash_area_open(FLASH_AREA_ID(image_1), &fa);
+	zassert_true(rc == 0, "flash_area_open() fail");
+
+	val = flash_area_erased_val(fa);
+
+	param = flash_get_parameters(fa->fa_dev);
+
+	zassert_equal(param->erase_value, val,
+		      "value different than the flash erase value");
+
+	flash_area_close(fa);
 }
+
+ZTEST_SUITE(flash_map, NULL, NULL, NULL, NULL, NULL);

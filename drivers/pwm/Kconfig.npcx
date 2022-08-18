@@ -4,8 +4,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 config PWM_NPCX
-	bool "Nuvoton NPCX embedd controller (EC) PWM driver"
-	depends on SOC_FAMILY_NPCX
+	bool "Nuvoton NPCX embedded controller (EC) PWM driver"
+	default y
+	depends on DT_HAS_NUVOTON_NPCX_PWM_ENABLED
 	help
 	  This option enables the PWM driver for NPCX family of
 	  processors.

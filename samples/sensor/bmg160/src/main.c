@@ -4,18 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr.h>
+#include <zephyr/zephyr.h>
 
-#include <sys/printk.h>
-#include <sys_clock.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/sys_clock.h>
 #include <stdio.h>
 
-#include <device.h>
-#include <drivers/sensor.h>
-#include <drivers/i2c.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/i2c.h>
 
 #define MAX_TEST_TIME	15000
 #define SLEEPTIME	300
+
+#if !DT_HAS_COMPAT_STATUS_OKAY(bosch_bmg160)
+#error "No bosch,bmg160 compatible node found in the device tree"
+#endif
 
 static void print_gyro_data(const struct device *bmg160)
 {
@@ -66,7 +70,7 @@ static void test_polling_mode(const struct device *bmg160)
 }
 
 static void trigger_handler(const struct device *bmg160,
-			    struct sensor_trigger *trigger)
+			    const struct sensor_trigger *trigger)
 {
 	if (trigger->type != SENSOR_TRIG_DATA_READY &&
 	    trigger->type != SENSOR_TRIG_DELTA) {
@@ -168,14 +172,13 @@ static void test_trigger_mode(const struct device *bmg160)
 
 void main(void)
 {
-	const struct device *bmg160;
+	const struct device *bmg160 = DEVICE_DT_GET_ANY(bosch_bmg160);
 #if defined(CONFIG_BMG160_RANGE_RUNTIME)
 	struct sensor_value attr;
 #endif
 
-	bmg160 = device_get_binding("bmg160");
-	if (!bmg160) {
-		printf("Device not found.\n");
+	if (!device_is_ready(bmg160)) {
+		printf("Device %s is not ready.\n", bmg160->name);
 		return;
 	}
 

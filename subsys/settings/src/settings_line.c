@@ -8,10 +8,10 @@
 #include <ctype.h>
 #include <string.h>
 
-#include "settings/settings.h"
+#include <zephyr/settings/settings.h>
 #include "settings_priv.h"
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(settings, CONFIG_SETTINGS_LOG_LEVEL);
 
 struct settings_io_cb_s {
@@ -295,7 +295,15 @@ int settings_line_entry_copy(void *dst_ctx, off_t dst_off, void *src_ctx,
 			break;
 		}
 
-		rc = settings_io_cb.write_cb(dst_ctx, dst_off, buf, chunk_size);
+		size_t write_size = chunk_size;
+
+		if (chunk_size % settings_io_cb.rwbs) {
+			write_size += settings_io_cb.rwbs -
+				      chunk_size % settings_io_cb.rwbs;
+		}
+
+		rc = settings_io_cb.write_cb(dst_ctx, dst_off, buf, write_size);
+
 		if (rc) {
 			break;
 		}

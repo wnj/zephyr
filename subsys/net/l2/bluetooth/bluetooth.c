@@ -4,30 +4,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_bt, CONFIG_NET_L2_BT_LOG_LEVEL);
 
-#include <kernel.h>
-#include <toolchain.h>
-#include <linker/sections.h>
+#include <zephyr/kernel.h>
+#include <zephyr/toolchain.h>
+#include <zephyr/linker/sections.h>
 #include <string.h>
 #include <errno.h>
 
-#include <device.h>
-#include <init.h>
+#include <zephyr/device.h>
+#include <zephyr/init.h>
 
-#include <net/net_pkt.h>
-#include <net/net_core.h>
-#include <net/net_l2.h>
-#include <net/net_if.h>
-#include <net/bt.h>
+#include <zephyr/net/net_pkt.h>
+#include <zephyr/net/net_core.h>
+#include <zephyr/net/net_l2.h>
+#include <zephyr/net/net_if.h>
+#include <zephyr/net/capture.h>
+#include <zephyr/net/bt.h>
 #include <6lo.h>
 
-#include <bluetooth/bluetooth.h>
-#include <bluetooth/hci.h>
-#include <bluetooth/conn.h>
-#include <bluetooth/uuid.h>
-#include <bluetooth/l2cap.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/bluetooth/l2cap.h>
 
 #include "net_private.h"
 #include "ipv6.h"
@@ -108,7 +109,9 @@ static int net_bt_send(struct net_if *iface, struct net_pkt *pkt)
 
 	length = net_pkt_get_len(pkt);
 
-	/* Dettach data fragments for packet */
+	net_capture_pkt(iface, pkt);
+
+	/* Detach data fragments for packet */
 	buffer = pkt->buffer;
 	pkt->buffer = NULL;
 
@@ -116,6 +119,7 @@ static int net_bt_send(struct net_if *iface, struct net_pkt *pkt)
 	if (ret < 0) {
 		NET_ERR("Unable to send packet: %d", ret);
 		bt_l2cap_chan_disconnect(&conn->ipsp_chan.chan);
+		net_buf_unref(buffer);
 		return ret;
 	}
 
@@ -130,7 +134,7 @@ static int net_bt_enable(struct net_if *iface, bool state)
 
 	NET_DBG("iface %p %s", iface, state ? "up" : "down");
 
-	if (state && conn->ipsp_chan.chan.state != BT_L2CAP_CONNECTED) {
+	if (state && conn->ipsp_chan.state != BT_L2CAP_CONNECTED) {
 		return -ENETDOWN;
 	}
 
@@ -139,7 +143,10 @@ static int net_bt_enable(struct net_if *iface, bool state)
 
 static enum net_l2_flags net_bt_flags(struct net_if *iface)
 {
-	return NET_L2_MULTICAST | NET_L2_MULTICAST_SKIP_JOIN_SOLICIT_NODE;
+	/* TODO: add NET_L2_MULTICAST_SKIP_JOIN_SOLICIT_NODE once the stack
+	 * supports Address Registration Option for neighbor discovery.
+	 */
+	return NET_L2_MULTICAST;
 }
 
 NET_L2_INIT(BLUETOOTH_L2, net_bt_recv, net_bt_send,
@@ -166,7 +173,7 @@ static void ipsp_connected(struct bt_l2cap_chan *chan)
 		bt_addr_le_to_str(info.le.dst, dst, sizeof(dst));
 
 		NET_DBG("Channel %p Source %s connected to Destination %s",
-			chan, log_strdup(src), log_strdup(dst));
+			chan, src, dst);
 	}
 
 	/* Swap bytes since net APIs expect big endian address */
@@ -313,7 +320,7 @@ static int ipsp_accept(struct bt_conn *conn, struct bt_l2cap_chan **chan)
 	struct bt_if_conn *if_conn = NULL;
 	int i;
 
-	NET_DBG("Incoming conn %p", conn);
+	NET_DBG("Incoming conn %p", (void *)conn);
 
 	/* Find unused slot to store the iface */
 	for (i = 0; i < CONFIG_BT_MAX_CONN; i++) {
@@ -425,7 +432,7 @@ static bool eir_found(uint8_t type, const uint8_t *data, uint8_t data_len,
 			char dev[BT_ADDR_LE_STR_LEN];
 
 			bt_addr_le_to_str(addr, dev, sizeof(dev));
-			NET_DBG("[DEVICE]: %s", log_strdup(dev));
+			NET_DBG("[DEVICE]: %s", dev);
 		}
 
 		/* TODO: Notify device address found */
@@ -556,7 +563,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 					  sizeof(addr));
 
 			NET_ERR("Failed to connect to %s (%u)\n",
-				log_strdup(addr), err);
+				addr, err);
 		}
 
 		return;
@@ -589,14 +596,14 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 		bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 		NET_DBG("Disconnected: %s (reason 0x%02x)\n",
-			log_strdup(addr), reason);
+			addr, reason);
 	}
 
 	bt_conn_unref(default_conn);
 	default_conn = NULL;
 }
 
-static struct bt_conn_cb conn_callbacks = {
+BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.connected = connected,
 	.disconnected = disconnected,
 };
@@ -604,12 +611,14 @@ static struct bt_conn_cb conn_callbacks = {
 
 static int net_bt_init(const struct device *dev)
 {
+	int err;
+
 	NET_DBG("dev %p driver_data %p", dev, dev->data);
 
-#if defined(CONFIG_NET_L2_BT_MGMT)
-	bt_conn_cb_register(&conn_callbacks);
-#endif
-	bt_l2cap_server_register(&server);
+	err = bt_l2cap_server_register(&server);
+	if (err) {
+		return err;
+	}
 
 	net_bt_shell_init();
 
@@ -623,8 +632,7 @@ NET_MGMT_REGISTER_REQUEST_HANDLER(NET_REQUEST_BT_SCAN, bt_scan);
 NET_MGMT_REGISTER_REQUEST_HANDLER(NET_REQUEST_BT_DISCONNECT, bt_disconnect);
 #endif
 
-DEVICE_AND_API_INIT(net_bt, "net_bt", net_bt_init, &bt_context_data, NULL,
-		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
-		    &bt_if_api);
+DEVICE_DEFINE(net_bt, "net_bt", net_bt_init, NULL, &bt_context_data, NULL,
+	      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &bt_if_api);
 NET_L2_DATA_INIT(net_bt, 0, NET_L2_GET_CTX_TYPE(BLUETOOTH_L2));
 NET_IF_INIT(net_bt, 0, BLUETOOTH_L2, L2CAP_IPSP_MTU, CONFIG_BT_MAX_CONN);

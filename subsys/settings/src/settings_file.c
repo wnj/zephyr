@@ -7,15 +7,15 @@
 
 #include <string.h>
 #include <stdbool.h>
-#include <zephyr.h>
+#include <zephyr/zephyr.h>
 
-#include <fs/fs.h>
+#include <zephyr/fs/fs.h>
 
-#include "settings/settings.h"
+#include <zephyr/settings/settings.h>
 #include "settings/settings_file.h"
 #include "settings_priv.h"
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 
 LOG_MODULE_DECLARE(settings, CONFIG_SETTINGS_LOG_LEVEL);
 
@@ -26,10 +26,12 @@ static int settings_file_load(struct settings_store *cs,
 			      const struct settings_load_arg *arg);
 static int settings_file_save(struct settings_store *cs, const char *name,
 			      const char *value, size_t val_len);
+static void *settings_fs_storage_get(struct settings_store *cs);
 
 static const struct settings_store_itf settings_file_itf = {
 	.csi_load = settings_file_load,
 	.csi_save = settings_file_save,
+	.csi_storage_get = settings_fs_storage_get
 };
 
 /*
@@ -122,6 +124,8 @@ static int settings_file_load_priv(struct settings_store *cs, line_load_cb cb,
 	};
 
 	lines = 0;
+
+	fs_file_t_init(&file);
 
 	rc = fs_open(&file, cf->cf_name, FS_O_CREATE | FS_O_RDWR);
 	if (rc != 0) {
@@ -240,6 +244,9 @@ static int settings_file_save_and_compress(struct settings_file *cf,
 	size_t new_name_len;
 	size_t val1_off;
 
+	fs_file_t_init(&rf);
+	fs_file_t_init(&wf);
+
 	if (fs_open(&rf, cf->cf_name, FS_O_CREATE | FS_O_RDWR) != 0) {
 		return -ENOEXEC;
 	}
@@ -258,7 +265,7 @@ static int settings_file_save_and_compress(struct settings_file *cf,
 		rc = settings_next_line_ctx(&loc1);
 
 		if (rc || loc1.len == 0) {
-			/* try to amend new value to the commpresed file */
+			/* try to amend new value to the compressed file */
 			break;
 		}
 
@@ -292,7 +299,7 @@ static int settings_file_save_and_compress(struct settings_file *cf,
 
 			if (rc || loc2.len == 0) {
 				/* try to amend new value to */
-				/* the commpresed file */
+				/* the compressed file */
 				break;
 			}
 
@@ -360,13 +367,15 @@ static int settings_file_save_priv(struct settings_store *cs, const char *name,
 {
 	struct settings_file *cf = (struct settings_file *)cs;
 	struct line_entry_ctx entry_ctx;
-	struct fs_file_t  file;
+	struct fs_file_t file;
 	int rc2;
 	int rc;
 
 	if (!name) {
 		return -EINVAL;
 	}
+
+	fs_file_t_init(&file);
 
 	if (cf->cf_maxlines && (cf->cf_lines + 1 >= cf->cf_maxlines)) {
 		/*
@@ -435,7 +444,7 @@ static int read_handler(void *ctx, off_t off, char *buf, size_t *len)
 	ssize_t r_len;
 	int rc;
 
-	/* 0 is reserved for reding the length-field only */
+	/* 0 is reserved for reading the length-field only */
 	if (entry_ctx->len != 0) {
 		if (off >= entry_ctx->len) {
 			*len = 0;
@@ -502,6 +511,7 @@ int settings_backend_init(void)
 		.cf_name = CONFIG_SETTINGS_FS_FILE,
 		.cf_maxlines = CONFIG_SETTINGS_FS_MAX_LINES
 	};
+	struct fs_dirent entry;
 	int rc;
 
 
@@ -520,14 +530,17 @@ int settings_backend_init(void)
 	/*
 	 * Must be called after root FS has been initialized.
 	 */
-	rc = fs_mkdir(CONFIG_SETTINGS_FS_DIR);
-
-	/*
-	 * The following lines mask the file exist error.
-	 */
-	if (rc == -EEXIST) {
-		rc = 0;
+	rc = fs_stat(CONFIG_SETTINGS_FS_DIR, &entry);
+	/* If directory doesn't exist, create it */
+	if (rc == -ENOENT) {
+		rc = fs_mkdir(CONFIG_SETTINGS_FS_DIR);
 	}
-
 	return rc;
+}
+
+static void *settings_fs_storage_get(struct settings_store *cs)
+{
+	struct settings_file *cf = (struct settings_file *)cs;
+
+	return (void *)cf->cf_name;
 }

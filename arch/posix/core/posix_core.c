@@ -44,9 +44,9 @@
 
 #include "posix_core.h"
 #include "posix_arch_internal.h"
-#include <arch/posix/posix_soc_if.h>
+#include <zephyr/arch/posix/posix_soc_if.h>
 #include "kernel_internal.h"
-#include "kernel_structs.h"
+#include <zephyr/kernel_structs.h>
 #include "ksched.h"
 #include "kswap.h"
 
@@ -506,17 +506,9 @@ void z_impl_k_thread_abort(k_tid_t thread)
 			threads_table[thread_idx].thead_cnt,
 			thread_idx,
 			__func__);
-
-		if (arch_is_in_isr()) {
-			z_thread_single_abort(thread);
-			return;
-		}
-
-		z_self_abort();
-		CODE_UNREACHABLE; /* LCOV_EXCL_LINE */
 	}
 
-	z_thread_single_abort(thread);
+	z_thread_abort(thread);
 
 	if (tstatus->aborted == 0) {
 		PC_DEBUG("%s aborting now [%i] %i\n",

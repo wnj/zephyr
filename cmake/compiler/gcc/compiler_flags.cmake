@@ -26,7 +26,7 @@ set_compiler_property(PROPERTY optimization_size  -Os)
 #######################################################
 
 # GCC Option standard warning base in Zephyr
-set_compiler_property(PROPERTY warning_base
+check_set_compiler_property(PROPERTY warning_base
     -Wall
     -Wformat
     -Wformat-security
@@ -39,13 +39,8 @@ check_set_compiler_property(APPEND PROPERTY warning_base -Wno-pointer-sign)
 # Prohibit void pointer arithmetic. Illegal in C99
 check_set_compiler_property(APPEND PROPERTY warning_base -Wpointer-arith)
 
-if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "9.1.0")
-  set_compiler_property(APPEND PROPERTY warning_base
-                        # FIXME: Remove once #16587 is fixed
-                        -Wno-address-of-packed-member
-  )
-endif()
-
+# not portable
+check_set_compiler_property(APPEND PROPERTY warning_base -Wexpansion-to-defined)
 
 # GCC options for warning levels 1, 2, 3, when using `-DW=[1|2|3]`
 set_compiler_property(PROPERTY warning_dw_1
@@ -89,7 +84,7 @@ check_set_compiler_property(APPEND PROPERTY warning_dw_3
                             -Wvla
 )
 
-set_compiler_property(PROPERTY warning_extended -Wno-unused-but-set-variable)
+check_set_compiler_property(PROPERTY warning_extended -Wno-unused-but-set-variable)
 
 check_set_compiler_property(PROPERTY warning_error_implicit_int -Werror=implicit-int)
 
@@ -111,10 +106,13 @@ set_compiler_property(PROPERTY cstd -std=)
 
 if (NOT CONFIG_NEWLIB_LIBC AND
     NOT COMPILER STREQUAL "xcc" AND
+    NOT CONFIG_HAS_ESPRESSIF_HAL AND
     NOT CONFIG_NATIVE_APPLICATION)
   set_compiler_property(PROPERTY nostdinc -nostdinc)
   set_compiler_property(APPEND PROPERTY nostdinc_include ${NOSTDINC})
 endif()
+
+set_compiler_property(TARGET compiler-cpp PROPERTY nostdincxx "-nostdinc++")
 
 # Required C++ flags when using gcc
 set_property(TARGET compiler-cpp PROPERTY required "-fcheck-new")
@@ -124,9 +122,17 @@ set_property(TARGET compiler-cpp PROPERTY dialect_cpp98 "-std=c++98")
 set_property(TARGET compiler-cpp PROPERTY dialect_cpp11 "-std=c++11" "-Wno-register")
 set_property(TARGET compiler-cpp PROPERTY dialect_cpp14 "-std=c++14" "-Wno-register")
 set_property(TARGET compiler-cpp PROPERTY dialect_cpp17 "-std=c++17" "-Wno-register")
-set_property(TARGET compiler-cpp PROPERTY dialect_cpp2a "-std=c++2a" "-Wno-register")
+set_property(TARGET compiler-cpp PROPERTY dialect_cpp2a "-std=c++2a"
+  "-Wno-register" "-Wno-volatile")
+set_property(TARGET compiler-cpp PROPERTY dialect_cpp20 "-std=c++20"
+  "-Wno-register" "-Wno-volatile")
+set_property(TARGET compiler-cpp PROPERTY dialect_cpp2b "-std=c++2b"
+  "-Wno-register" "-Wno-volatile")
 
-# Disable exeptions flag in C++
+# Flag for disabling strict aliasing rule in C and C++
+set_compiler_property(PROPERTY no_strict_aliasing -fno-strict-aliasing)
+
+# Disable exceptions flag in C++
 set_property(TARGET compiler-cpp PROPERTY no_exceptions "-fno-exceptions")
 
 # Disable rtti in C++
@@ -156,11 +162,15 @@ endif()
 # gcc flag for a hosted (no-freestanding) application
 check_set_compiler_property(APPEND PROPERTY hosted -fno-freestanding)
 
-# gcc flag for a freestandingapplication
-set_compiler_property(PROPERTY freestanding -ffreestanding)
+# gcc flag for a freestanding application
+check_set_compiler_property(PROPERTY freestanding -ffreestanding)
 
 # Flag to enable debugging
 set_compiler_property(PROPERTY debug -g)
+
+# GCC 11 by default emits DWARF version 5 which cannot be parsed by
+# pyelftools. Can be removed once pyelftools supports v5.
+check_set_compiler_property(APPEND PROPERTY debug -gdwarf-4)
 
 set_compiler_property(PROPERTY no_common -fno-common)
 
@@ -170,7 +180,20 @@ set_compiler_property(PROPERTY imacros -imacros)
 # GCC compiler flags for sanitizing.
 set_compiler_property(PROPERTY sanitize_address -fsanitize=address)
 
+set_compiler_property(PROPERTY gprof -pg)
+
 set_compiler_property(PROPERTY sanitize_undefined -fsanitize=undefined)
+
+# GCC compiler flag for turning off thread-safe initialization of local statics
+set_property(TARGET compiler-cpp PROPERTY no_threadsafe_statics "-fno-threadsafe-statics")
 
 # Required ASM flags when using gcc
 set_property(TARGET asm PROPERTY required "-xassembler-with-cpp")
+
+# gcc flag for colourful diagnostic messages
+if (NOT COMPILER STREQUAL "xcc")
+set_compiler_property(PROPERTY diagnostic -fdiagnostics-color=always)
+endif()
+
+# Compiler flag for disabling pointer arithmetic warnings
+set_compiler_property(PROPERTY warning_no_pointer_arithmetic "-Wno-pointer-arith")

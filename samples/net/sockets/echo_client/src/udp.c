@@ -7,16 +7,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(net_echo_client_sample, LOG_LEVEL_DBG);
 
-#include <zephyr.h>
+#include <zephyr/zephyr.h>
 #include <errno.h>
 #include <stdio.h>
 
-#include <net/socket.h>
-#include <net/tls_credentials.h>
-#include <random/rand32.h>
+#include <zephyr/net/socket.h>
+#include <zephyr/net/tls_credentials.h>
+#include <zephyr/random/rand32.h>
 
 #include "common.h"
 #include "ca_certificate.h"
@@ -40,7 +40,7 @@ static int send_udp_data(struct data *data)
 
 	LOG_DBG("%s UDP: Sent %d bytes", data->proto, data->udp.expecting);
 
-	k_delayed_work_submit(&data->udp.recv, UDP_WAIT);
+	k_work_reschedule(&data->udp.recv, UDP_WAIT);
 
 	return ret < 0 ? -EIO : 0;
 }
@@ -62,8 +62,9 @@ static int compare_udp_data(struct data *data, const char *buf, uint32_t receive
 
 static void wait_reply(struct k_work *work)
 {
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
 	/* This means that we did not receive response in time. */
-	struct data *data = CONTAINER_OF(work, struct data, udp.recv);
+	struct data *data = CONTAINER_OF(dwork, struct data, udp.recv);
 
 	LOG_ERR("UDP %s: Data packet not received", data->proto);
 
@@ -73,7 +74,8 @@ static void wait_reply(struct k_work *work)
 
 static void wait_transmit(struct k_work *work)
 {
-	struct data *data = CONTAINER_OF(work, struct data, udp.transmit);
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+	struct data *data = CONTAINER_OF(dwork, struct data, udp.transmit);
 
 	send_udp_data(data);
 }
@@ -83,8 +85,8 @@ static int start_udp_proto(struct data *data, struct sockaddr *addr,
 {
 	int ret;
 
-	k_delayed_work_init(&data->udp.recv, wait_reply);
-	k_delayed_work_init(&data->udp.transmit, wait_transmit);
+	k_work_init_delayable(&data->udp.recv, wait_reply);
+	k_work_init_delayable(&data->udp.transmit, wait_transmit);
 
 #if defined(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
 	data->udp.sock = socket(addr->sa_family, SOCK_DGRAM, IPPROTO_DTLS_1_2);
@@ -168,11 +170,11 @@ static int process_udp_proto(struct data *data)
 			data->udp.counter);
 	}
 
-	k_delayed_work_cancel(&data->udp.recv);
+	k_work_cancel_delayable(&data->udp.recv);
 
 	/* Do not flood the link if we have also TCP configured */
 	if (IS_ENABLED(CONFIG_NET_TCP)) {
-		k_delayed_work_submit(&data->udp.transmit, UDP_SLEEP);
+		k_work_reschedule(&data->udp.transmit, UDP_SLEEP);
 		ret = 0;
 	} else {
 		ret = send_udp_data(data);
@@ -251,8 +253,8 @@ int process_udp(void)
 void stop_udp(void)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
-		k_delayed_work_cancel(&conf.ipv6.udp.recv);
-		k_delayed_work_cancel(&conf.ipv6.udp.transmit);
+		k_work_cancel_delayable(&conf.ipv6.udp.recv);
+		k_work_cancel_delayable(&conf.ipv6.udp.transmit);
 
 		if (conf.ipv6.udp.sock >= 0) {
 			(void)close(conf.ipv6.udp.sock);
@@ -260,8 +262,8 @@ void stop_udp(void)
 	}
 
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
-		k_delayed_work_cancel(&conf.ipv4.udp.recv);
-		k_delayed_work_cancel(&conf.ipv4.udp.transmit);
+		k_work_cancel_delayable(&conf.ipv4.udp.recv);
+		k_work_cancel_delayable(&conf.ipv4.udp.transmit);
 
 		if (conf.ipv4.udp.sock >= 0) {
 			(void)close(conf.ipv4.udp.sock);

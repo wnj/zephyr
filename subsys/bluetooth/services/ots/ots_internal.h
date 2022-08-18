@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Nordic Semiconductor ASA
+ * Copyright (c) 2020-2022 Nordic Semiconductor ASA
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -15,6 +15,36 @@ extern "C" {
 #include "ots_l2cap_internal.h"
 #include "ots_oacp_internal.h"
 #include "ots_olcp_internal.h"
+
+#define BT_OTS_SET_METADATA_REQ_NAME(metadata) \
+	((metadata) = (metadata) | BT_OTS_METADATA_REQ_NAME)
+#define BT_OTS_SET_METADATA_REQ_TYPE(metadata) \
+	((metadata) = (metadata) | BT_OTS_METADATA_REQ_TYPE)
+#define BT_OTS_SET_METADATA_REQ_SIZE(metadata) \
+	((metadata) = (metadata) | BT_OTS_METADATA_REQ_SIZE)
+#define BT_OTS_SET_METADATA_REQ_CREATED(metadata) \
+	((metadata) = (metadata) | BT_OTS_METADATA_REQ_CREATED)
+#define BT_OTS_SET_METADATA_REQ_MODIFIED(metadata) \
+	((metadata) = (metadata) | BT_OTS_METADATA_REQ_MODIFIED)
+#define BT_OTS_SET_METADATA_REQ_ID(metadata) \
+	((metadata) = (metadata) | BT_OTS_METADATA_REQ_ID)
+#define BT_OTS_SET_METADATA_REQ_PROPS(metadata) \
+	((metadata) = (metadata) | BT_OTS_METADATA_REQ_PROPS)
+
+#define BT_OTS_GET_METADATA_REQ_NAME(metadata) \
+	((metadata) & BT_OTS_METADATA_REQ_NAME)
+#define BT_OTS_GET_METADATA_REQ_TYPE(metadata) \
+	((metadata) & BT_OTS_METADATA_REQ_TYPE)
+#define BT_OTS_GET_METADATA_REQ_SIZE(metadata) \
+	((metadata) & BT_OTS_METADATA_REQ_SIZE)
+#define BT_OTS_GET_METADATA_REQ_CREATED(metadata) \
+	((metadata) & BT_OTS_METADATA_REQ_CREATED)
+#define BT_OTS_GET_METADATA_REQ_MODIFIED(metadata) \
+	((metadata) & BT_OTS_METADATA_REQ_MODIFIED)
+#define BT_OTS_GET_METADATA_REQ_ID(metadata) \
+	((metadata) & BT_OTS_METADATA_REQ_ID)
+#define BT_OTS_GET_METADATA_REQ_PROPS(metadata) \
+	((metadata) & BT_OTS_METADATA_REQ_PROPS)
 
 /**@brief OTS Attribute Protocol Application Error codes. */
 enum bt_gatt_ots_att_err_codes {
@@ -41,6 +71,8 @@ enum bt_gatt_ots_object_state_type {
 	BT_GATT_OTS_OBJECT_IDLE_STATE,
 
 	BT_GATT_OTS_OBJECT_READ_OP_STATE,
+
+	BT_GATT_OTS_OBJECT_WRITE_OP_STATE,
 };
 
 struct bt_gatt_ots_object_state {
@@ -50,6 +82,10 @@ struct bt_gatt_ots_object_state {
 			struct bt_gatt_ots_oacp_read_params oacp_params;
 			uint32_t sent_len;
 		} read_op;
+		struct bt_gatt_ots_object_write_op {
+			struct bt_gatt_ots_oacp_write_params oacp_params;
+			uint32_t recv_len;
+		} write_op;
 	};
 };
 
@@ -74,9 +110,13 @@ struct bt_ots {
 	struct bt_gatt_ots_indicate olcp_ind;
 	struct bt_gatt_ots_l2cap l2cap;
 	struct bt_ots_cb *cb;
+	struct bt_ots_dir_list *dir_list;
 	void *obj_manager;
 };
 
+int bt_ots_obj_add_internal(struct bt_ots *ots, struct bt_conn *conn,
+			    const struct bt_ots_obj_add_param *param,
+			    struct bt_gatt_ots_object **obj);
 #ifdef __cplusplus
 }
 #endif

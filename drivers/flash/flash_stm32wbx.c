@@ -7,16 +7,16 @@
 
 #define LOG_DOMAIN flash_stm32wb
 #define LOG_LEVEL CONFIG_FLASH_LOG_LEVEL
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(LOG_DOMAIN);
 
-#include <kernel.h>
-#include <device.h>
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
 #include <string.h>
-#include <drivers/flash.h>
-#include <init.h>
+#include <zephyr/drivers/flash.h>
+#include <zephyr/init.h>
 #include <soc.h>
-#include <sys/__assert.h>
+#include <zephyr/sys/__assert.h>
 
 #include "flash_stm32.h"
 #include "stm32_hsem.h"
@@ -43,6 +43,30 @@ bool flash_stm32_valid_range(const struct device *dev, off_t offset,
 static uint32_t get_page(off_t offset)
 {
 	return offset >> STM32WBX_PAGE_SHIFT;
+}
+
+static inline void flush_cache(FLASH_TypeDef *regs)
+{
+	if (regs->ACR & FLASH_ACR_DCEN) {
+		regs->ACR &= ~FLASH_ACR_DCEN;
+		/* Datasheet: DCRST: Data cache reset
+		 * This bit can be written only when the data cache is disabled
+		 */
+		regs->ACR |= FLASH_ACR_DCRST;
+		regs->ACR &= ~FLASH_ACR_DCRST;
+		regs->ACR |= FLASH_ACR_DCEN;
+	}
+
+	if (regs->ACR & FLASH_ACR_ICEN) {
+		regs->ACR &= ~FLASH_ACR_ICEN;
+		/* Datasheet: ICRST: Instruction cache reset :
+		 * This bit can be written only when the instruction cache
+		 * is disabled
+		 */
+		regs->ACR |= FLASH_ACR_ICRST;
+		regs->ACR &= ~FLASH_ACR_ICRST;
+		regs->ACR |= FLASH_ACR_ICEN;
+	}
 }
 
 static int write_dword(const struct device *dev, off_t offset, uint64_t val)
@@ -90,8 +114,9 @@ static int write_dword(const struct device *dev, off_t offset, uint64_t val)
 		 * However, keeping that code make it compatible with both
 		 * mechanisms.
 		 */
-		while (LL_FLASH_IsActiveFlag_OperationSuspended())
+		while (LL_FLASH_IsActiveFlag_OperationSuspended()) {
 			;
+		}
 
 		/* Enter critical section */
 		key = irq_lock();
@@ -121,7 +146,7 @@ static int write_dword(const struct device *dev, off_t offset, uint64_t val)
 			 *  get/release the semaphore.
 			 *
 			 *  However, keeping that code make it compatible with
-			 *  bothmechanisms.
+			 *  both mechanisms.
 			 *  The protection by semaphore is enabled on CPU2 side
 			 *  with the command SHCI_C2_SetFlashActivityControl()
 			 *
@@ -200,6 +225,13 @@ static int erase_page(const struct device *dev, uint32_t page)
 		return rc;
 	}
 
+	/*
+	 * If an erase operation in Flash memory also concerns data in the data
+	 * or instruction cache, the user has to ensure that these data
+	 * are rewritten before they are accessed during code execution.
+	 */
+	flush_cache(regs);
+
 	/* Implementation of STM32 AN5289, proposed in STM32WB Cube Application
 	 * BLE_RfWithFlash
 	 * https://github.com/STMicroelectronics/STM32CubeWB/tree/master/Projects/P-NUCLEO-WB55.Nucleo/Applications/BLE/BLE_RfWithFlash
@@ -219,8 +251,9 @@ static int erase_page(const struct device *dev, uint32_t page)
 		 * However, keeping that code make it compatible with both
 		 * mechanisms.
 		 */
-		while (LL_FLASH_IsActiveFlag_OperationSuspended())
+		while (LL_FLASH_IsActiveFlag_OperationSuspended()) {
 			;
+		}
 
 		/* Enter critical section */
 		key = irq_lock();
@@ -250,7 +283,7 @@ static int erase_page(const struct device *dev, uint32_t page)
 			 *  get/release the semaphore.
 			 *
 			 *  However, keeping that code make it compatible with
-			 *  bothmechanisms.
+			 *  both mechanisms.
 			 *  The protection by semaphore is enabled on CPU2 side
 			 *  with the command SHCI_C2_SetFlashActivityControl()
 			 *
@@ -387,7 +420,7 @@ int flash_stm32_check_status(const struct device *dev)
 	error = (regs->SR & FLASH_FLAG_SR_ERRORS);
 	error |= (regs->ECCR & FLASH_FLAG_ECCC);
 
-	/* Clear systematic Option and Enginneering bits validity error */
+	/* Clear systematic Option and Engineering bits validity error */
 	if (error & FLASH_FLAG_OPTVERR) {
 		regs->SR |= FLASH_FLAG_SR_ERRORS;
 		return 0;

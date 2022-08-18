@@ -9,20 +9,20 @@
  */
 
 #include <string.h>
-#include <zephyr.h>
-#include <init.h>
-#include "net/buf.h"
+#include <zephyr/zephyr.h>
+#include <zephyr/init.h>
+#include <zephyr/net/buf.h>
+#include <zephyr/mgmt/mcumgr/buf.h>
 #include "mgmt/mgmt.h"
-#include "mgmt/mcumgr/serial.h"
-#include "mgmt/mcumgr/buf.h"
-#include "mgmt/mcumgr/smp.h"
-#include "mgmt/mcumgr/smp_shell.h"
-#include "drivers/uart.h"
+#include <zephyr/mgmt/mcumgr/serial.h>
+#include <zephyr/mgmt/mcumgr/smp.h>
+#include <zephyr/mgmt/mcumgr/smp_shell.h>
+#include <zephyr/drivers/uart.h>
 #include "syscalls/uart.h"
-#include "shell/shell.h"
-#include "shell/shell_uart.h"
+#include <zephyr/shell/shell.h>
+#include <zephyr/shell/shell_uart.h>
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(smp_shell);
 
 static struct zephyr_smp_transport smp_shell_transport;
@@ -137,19 +137,21 @@ void smp_shell_process(struct smp_shell_data *data)
 	struct net_buf *buf;
 	struct net_buf *nb;
 
-	buf = net_buf_get(&data->buf_ready, K_NO_WAIT);
-	if (!buf) {
-		return;
-	}
+	while (true) {
+		buf = net_buf_get(&data->buf_ready, K_NO_WAIT);
+		if (!buf) {
+			break;
+		}
 
-	nb = mcumgr_serial_process_frag(&smp_shell_rx_ctxt,
-					buf->data,
-					buf->len);
-	if (nb != NULL) {
-		zephyr_smp_rx_req(&smp_shell_transport, nb);
-	}
+		nb = mcumgr_serial_process_frag(&smp_shell_rx_ctxt,
+						buf->data,
+						buf->len);
+		if (nb != NULL) {
+			zephyr_smp_rx_req(&smp_shell_transport, nb);
+		}
 
-	net_buf_unref(buf);
+		net_buf_unref(buf);
+	}
 }
 
 static uint16_t smp_shell_get_mtu(const struct net_buf *nb)

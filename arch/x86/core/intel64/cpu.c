@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <kernel.h>
+#include <zephyr/kernel.h>
 #include <kernel_arch_data.h>
 #include <kernel_arch_func.h>
-#include <kernel_structs.h>
+#include <zephyr/kernel_structs.h>
 #include <kernel_internal.h>
-#include <arch/x86/multiboot.h>
+#include <zephyr/arch/x86/multiboot.h>
 #include <x86_mmu.h>
-#include <drivers/interrupt_controller/loapic.h>
-#include <arch/x86/acpi.h>
+#include <zephyr/drivers/interrupt_controller/loapic.h>
+#include <zephyr/arch/x86/acpi.h>
 
 /*
  * Map of CPU logical IDs to CPU local APIC IDs. By default,
@@ -23,10 +23,15 @@ __weak uint8_t x86_cpu_loapics[] = { 0, 1, 2, 3 };
 
 extern char x86_ap_start[];  /* AP entry point in locore.S */
 
-extern uint8_t _exception_stack[];
-extern uint8_t _exception_stack1[];
-extern uint8_t _exception_stack2[];
-extern uint8_t _exception_stack3[];
+extern uint8_t z_x86_exception_stack[];
+extern uint8_t z_x86_exception_stack1[];
+extern uint8_t z_x86_exception_stack2[];
+extern uint8_t z_x86_exception_stack3[];
+
+extern uint8_t z_x86_nmi_stack[];
+extern uint8_t z_x86_nmi_stack1[];
+extern uint8_t z_x86_nmi_stack2[];
+extern uint8_t z_x86_nmi_stack3[];
 
 #ifdef CONFIG_X86_KPTI
 extern uint8_t z_x86_trampoline_stack[];
@@ -40,7 +45,8 @@ struct x86_tss64 tss0 = {
 #ifdef CONFIG_X86_KPTI
 	.ist2 = (uint64_t) z_x86_trampoline_stack + Z_X86_TRAMPOLINE_STACK_SIZE,
 #endif
-	.ist7 = (uint64_t) _exception_stack + CONFIG_X86_EXCEPTION_STACK_SIZE,
+	.ist6 = (uint64_t) z_x86_nmi_stack + CONFIG_X86_EXCEPTION_STACK_SIZE,
+	.ist7 = (uint64_t) z_x86_exception_stack + CONFIG_X86_EXCEPTION_STACK_SIZE,
 	.iomapb = 0xFFFF,
 	.cpu = &(_kernel.cpus[0])
 };
@@ -51,7 +57,8 @@ struct x86_tss64 tss1 = {
 #ifdef CONFIG_X86_KPTI
 	.ist2 = (uint64_t) z_x86_trampoline_stack1 + Z_X86_TRAMPOLINE_STACK_SIZE,
 #endif
-	.ist7 = (uint64_t) _exception_stack1 + CONFIG_X86_EXCEPTION_STACK_SIZE,
+	.ist6 = (uint64_t) z_x86_nmi_stack1 + CONFIG_X86_EXCEPTION_STACK_SIZE,
+	.ist7 = (uint64_t) z_x86_exception_stack1 + CONFIG_X86_EXCEPTION_STACK_SIZE,
 	.iomapb = 0xFFFF,
 	.cpu = &(_kernel.cpus[1])
 };
@@ -63,7 +70,8 @@ struct x86_tss64 tss2 = {
 #ifdef CONFIG_X86_KPTI
 	.ist2 = (uint64_t) z_x86_trampoline_stack2 + Z_X86_TRAMPOLINE_STACK_SIZE,
 #endif
-	.ist7 = (uint64_t) _exception_stack2 + CONFIG_X86_EXCEPTION_STACK_SIZE,
+	.ist6 = (uint64_t) z_x86_nmi_stack2 + CONFIG_X86_EXCEPTION_STACK_SIZE,
+	.ist7 = (uint64_t) z_x86_exception_stack2 + CONFIG_X86_EXCEPTION_STACK_SIZE,
 	.iomapb = 0xFFFF,
 	.cpu = &(_kernel.cpus[2])
 };
@@ -75,11 +83,20 @@ struct x86_tss64 tss3 = {
 #ifdef CONFIG_X86_KPTI
 	.ist2 = (uint64_t) z_x86_trampoline_stack3 + Z_X86_TRAMPOLINE_STACK_SIZE,
 #endif
-	.ist7 = (uint64_t) _exception_stack3 + CONFIG_X86_EXCEPTION_STACK_SIZE,
+	.ist6 = (uint64_t) z_x86_nmi_stack3 + CONFIG_X86_EXCEPTION_STACK_SIZE,
+	.ist7 = (uint64_t) z_x86_exception_stack3 + CONFIG_X86_EXCEPTION_STACK_SIZE,
 	.iomapb = 0xFFFF,
 	.cpu = &(_kernel.cpus[3])
 };
 #endif
+
+
+/* We must put this in a dedicated section, or else it will land into .bss:
+ * in this case, though locore.S initalizes it relevantly, all will be
+ * lost when calling z_bss_zero() in z_x86_cpu_init prior to using it.
+ */
+Z_GENERIC_SECTION(.boot_arg)
+x86_boot_arg_t x86_cpu_boot_arg;
 
 struct x86_cpuboot x86_cpuboot[] = {
 	{
@@ -90,6 +107,7 @@ struct x86_cpuboot x86_cpuboot[] = {
 		.stack_size =
 			Z_KERNEL_STACK_SIZE_ADJUST(CONFIG_ISR_STACK_SIZE),
 		.fn = z_x86_prep_c,
+		.arg = &x86_cpu_boot_arg,
 	},
 #if CONFIG_MP_NUM_CPUS > 1
 	{
@@ -155,7 +173,15 @@ FUNC_NORETURN void z_x86_cpu_init(struct x86_cpuboot *cpuboot)
 	x86_sse_init(NULL);
 
 	/* The internal cpu_number is the index to x86_cpuboot[] */
-	z_loapic_enable((unsigned char)(cpuboot - x86_cpuboot));
+	unsigned char cpu_num = (unsigned char)(cpuboot - x86_cpuboot);
+
+	if (cpu_num == 0U) {
+		/* Only need to do these once per boot */
+		z_bss_zero();
+		z_data_copy();
+	}
+
+	z_loapic_enable(cpu_num);
 
 #ifdef CONFIG_USERSPACE
 	/* Set landing site for 'syscall' instruction */

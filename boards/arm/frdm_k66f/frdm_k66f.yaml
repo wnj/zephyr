@@ -24,3 +24,5 @@ supported:
   - uart
 testing:
   default: true
+ram: 256
+flash: 2048
